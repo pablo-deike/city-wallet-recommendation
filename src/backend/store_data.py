@@ -47,17 +47,17 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
 def filter_merchants_by_distance(lat: float, lon: float, radius_km: float) -> pl.DataFrame:
     if merchants_df is None:
         return pl.DataFrame(schema=MERCHANTS_SCHEMA)
-    
+
     # Approximate 1 degree ≈ 111 km for both lat/lon at Munich latitude
     R = 6371.0
     km_per_degree = R * 3.141592653589793 / 180.0
-    
+
     dlat = pl.col("lat") - lat
     dlon = pl.col("lon") - lon
-    
+
     # Approximate distance (good for small distances)
-    distance_km = (km_per_degree * (dlat ** 2 + dlon ** 2).sqrt()).alias("distance_km")
-    
+    distance_km = (km_per_degree * (dlat**2 + dlon**2).sqrt()).alias("distance_km")
+
     df = merchants_df.with_columns(distance_km)
     return df.filter(pl.col("distance_km") <= radius_km)
 

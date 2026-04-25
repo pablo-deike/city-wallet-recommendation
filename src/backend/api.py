@@ -10,50 +10,70 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from src.backend import gather_data, store_data
+from src.backend.config import Filepaths
 
 load_dotenv()
 
 scheduler = AsyncIOScheduler()
 
-
-class ConfigModel(BaseModel):
-    weather_interval_hours: int = 1
-    places_interval_hours: int = 24
-
-
 config = gather_data.Config.from_env()
-api_config = ConfigModel()
 
 
-async def refresh_merchants():
+async def refresh_merchants(force: bool = False) -> None:
     try:
+        if not force:
+            cached_merchants, _ = gather_data.load_from_parquet()
+            if cached_merchants is not None and len(cached_merchants) > 0:
+                store_data.merchants_df = cached_merchants
+                store_data.last_fetch["merchants"] = datetime.now()
+                print(f"[{datetime.now()}] Loaded merchants from cache: {len(cached_merchants)} places")
+                return
+
         store_data.merchants_df = await gather_data.fetch_merchants(config)
         store_data.last_fetch["merchants"] = datetime.now()
-        print(f"[{datetime.now()}] Refreshed merchants: {len(store_data.merchants_df)} places")
+
+        if store_data.weather_df is not None:
+            gather_data.save_to_parquet(store_data.merchants_df, store_data.weather_df)
+
+        print(f"[{datetime.now()}] Refreshed merchants from API: {len(store_data.merchants_df)} places")
     except Exception as e:
         print(f"[{datetime.now()}] Failed to refresh merchants: {e}")
 
 
-async def refresh_weather():
+async def refresh_weather(force: bool = False) -> None:
     try:
+        if not force:
+            _, cached_weather = gather_data.load_from_parquet()
+            if cached_weather is not None and len(cached_weather) > 0:
+                age_minutes = (datetime.now() - cached_weather.row(0, named=True)["timestamp"]).total_seconds() / 60
+                if age_minutes < 60:
+                    store_data.weather_df = cached_weather
+                    store_data.last_fetch["weather"] = datetime.now()
+                    print(f"[{datetime.now()}] Loaded weather from cache (age: {int(age_minutes)} min)")
+                    return
+
         store_data.weather_df = await gather_data.fetch_weather(config)
         store_data.last_fetch["weather"] = datetime.now()
-        print(f"[{datetime.now()}] Refreshed weather")
+
+        if store_data.merchants_df is not None:
+            gather_data.save_to_parquet(store_data.merchants_df, store_data.weather_df)
+
+        print(f"[{datetime.now()}] Refreshed weather from API")
     except Exception as e:
         print(f"[{datetime.now()}] Failed to refresh weather: {e}")
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> None:
     await refresh_merchants()
     await refresh_weather()
-    
+
     scheduler.add_job(refresh_weather, "interval", hours=config.weather_interval_hours)
     scheduler.add_job(refresh_merchants, "interval", hours=config.places_interval_hours)
     scheduler.start()
-    
+
     yield
-    
+
     scheduler.shutdown()
 
 
@@ -90,25 +110,33 @@ class HealthResponse(BaseModel):
     merchants_age_hours: int | None
     last_merchants_fetch: str | None
     last_weather_fetch: str | None
+    grid_size: int
+    spacing_km: float
+    data_path: str
 
 
 @app.get("/api/health", response_model=HealthResponse)
-def health():
+def health() -> HealthResponse:
     return HealthResponse(
         status="ok",
         merchants_count=store_data.get_merchants_count(),
         weather_age_minutes=store_data.get_weather_age_minutes(),
         merchants_age_hours=store_data.get_merchants_age_hours(),
-        last_merchants_fetch=store_data.last_fetch.get("merchants", "").isoformat() if store_data.last_fetch.get("merchants") else None,
+        last_merchants_fetch=store_data.last_fetch.get("merchants", "").isoformat()
+        if store_data.last_fetch.get("merchants")
+        else None,
         last_weather_fetch=store_data.last_fetch.get("weather", "").isoformat() if store_data.last_fetch.get("weather") else None,
+        grid_size=config.grid_config.grid_size,
+        spacing_km=config.grid_config.spacing_km,
+        data_path=str(Filepaths.GOOGLE_DATA),
     )
 
 
 @app.get("/api/weather", response_model=WeatherResponse)
-def get_weather():
+def get_weather() -> WeatherResponse:
     if store_data.weather_df is None or len(store_data.weather_df) == 0:
         raise HTTPException(status_code=503, detail="Weather data not available")
-    
+
     row = store_data.weather_df.row(0, named=True)
     return WeatherResponse(
         timestamp=row["timestamp"].isoformat(),
@@ -124,14 +152,14 @@ def get_weather():
 
 
 @app.get("/api/merchants", response_model=MerchantsResponse)
-def get_merchants(lat: float, lon: float, radius_km: float = 1.0, category: str | None = None):
+def get_merchants(lat: float, lon: float, radius_km: float = 1.0, category: str | None = None) -> MerchantsResponse:
     df = store_data.filter_merchants_by_distance(lat, lon, radius_km)
-    
+
     if category:
         df = df.filter(pl.col("types").list.contains(category))
-    
+
     merchants = df.to_dicts()
-    
+
     return MerchantsResponse(
         count=len(merchants),
         merchants=merchants,
@@ -139,10 +167,10 @@ def get_merchants(lat: float, lon: float, radius_km: float = 1.0, category: str 
 
 
 @app.get("/api/context", response_model=ContextResponse)
-def get_context(lat: float, lon: float, radius_km: float = 1.0):
+def get_context(lat: float, lon: float, radius_km: float = 1.0) -> ContextResponse:
     merchants_df = store_data.filter_merchants_by_distance(lat, lon, radius_km)
     merchants = merchants_df.to_dicts()
-    
+
     weather = None
     if store_data.weather_df is not None and len(store_data.weather_df) > 0:
         row = store_data.weather_df.row(0, named=True)
@@ -157,7 +185,7 @@ def get_context(lat: float, lon: float, radius_km: float = 1.0):
             cloud_cover=row["cloud_cover"],
             is_daytime=row["is_daytime"],
         )
-    
+
     return ContextResponse(
         weather=weather,
         merchants=merchants,
@@ -166,7 +194,11 @@ def get_context(lat: float, lon: float, radius_km: float = 1.0):
 
 
 @app.post("/api/admin/refresh")
-async def manual_refresh():
-    await refresh_merchants()
-    await refresh_weather()
-    return {"status": "refreshed", "merchants_count": store_data.get_merchants_count()}
+async def manual_refresh(force: bool = True) -> dict[str, str | int]:
+    await refresh_merchants(force=force)
+    await refresh_weather(force=force)
+    return {
+        "status": "refreshed",
+        "merchants_count": store_data.get_merchants_count(),
+        "data_path": str(Filepaths.GOOGLE_DATA),
+    }
