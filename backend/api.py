@@ -29,6 +29,7 @@ class ClaimPayload(BaseModel):
 class RedeemPayload(BaseModel):
     user_id: str
     qr_token: str
+    purchase_amount: float = 10.0  # Default purchase amount
 
 class DismissPayload(BaseModel):
     user_id: str
@@ -75,6 +76,9 @@ offers_store = {}
 # Track merchant statistics and rules
 merchant_stats = {}
 merchant_rules = {}
+
+# Track user wallets
+user_wallets = {}
 
 
 # ── Offer endpoints ───────────────────────────────────────────────────────────
@@ -170,16 +174,65 @@ def redeem_offer(offer_id: str, body: RedeemPayload):
     print(f"  offer_id  : {offer_id}")
     print(f"  user_id   : {body.user_id}")
     print(f"  qr_token  : {body.qr_token}")
+    print(f"  purchase_amount: €{body.purchase_amount:.2f}")
+    
+    # Validate QR token format
+    if not body.qr_token.startswith("QR-"):
+        return {"error": "Invalid QR token format"}
+    
+    # Look up the offer
+    offer = offers_store.get(offer_id)
+    if not offer:
+        return {"error": "Offer not found or expired"}
+    
     print(f"  → validating QR token... ✓")
     print(f"  → marking offer as redeemed")
-    print(f"  → calculating cashback: 15% of €3.00 = €0.45")
-    print(f"  → crediting €0.45 to wallet of {body.user_id}")
-    print(f"  → new wallet balance: €2.85")
+    
+    # Extract discount percentage from discount string (e.g., "15% off any hot drink" → 15)
+    discount_str = offer.get("discount", "0% off")
+    try:
+        discount_percent = int(discount_str.split("%")[0])
+    except (ValueError, IndexError):
+        discount_percent = 0
+    
+    # Calculate cashback
+    cashback_earned = (body.purchase_amount * discount_percent) / 100
+    
+    print(f"  → calculating cashback: {discount_percent}% of €{body.purchase_amount:.2f} = €{cashback_earned:.2f}")
+    
+    # Get or initialize user wallet
+    if body.user_id not in user_wallets:
+        user_wallets[body.user_id] = 0.0
+    
+    old_balance = user_wallets[body.user_id]
+    new_balance = old_balance + cashback_earned
+    user_wallets[body.user_id] = new_balance
+    
+    print(f"  → crediting €{cashback_earned:.2f} to wallet of {body.user_id}")
+    print(f"  → old balance: €{old_balance:.2f} → new balance: €{new_balance:.2f}")
+    
+    # Update merchant stats
+    merchant_id = offer.get("merchant_id")
+    if merchant_id not in merchant_stats:
+        merchant_stats[merchant_id] = {
+            "offers_sent": 0,
+            "offers_accepted": 0,
+            "cashback_issued": 0.0,
+        }
+    
+    merchant_stats[merchant_id]["offers_accepted"] += 1
+    merchant_stats[merchant_id]["cashback_issued"] += cashback_earned
+    
     return {
         "success": True,
-        "cashback_earned": 0.45,
-        "new_balance": 2.85,
-        "message": "Cashback of €0.45 added to your wallet",
+        "offer_id": offer_id,
+        "merchant": offer.get("merchant"),
+        "discount": offer.get("discount"),
+        "purchase_amount": body.purchase_amount,
+        "cashback_earned": round(cashback_earned, 2),
+        "old_balance": round(old_balance, 2),
+        "new_balance": round(new_balance, 2),
+        "message": f"Cashback of €{cashback_earned:.2f} added to your wallet",
     }
 
 
@@ -192,6 +245,27 @@ def dismiss_offer(offer_id: str, body: DismissPayload):
     print(f"  → logging dismissal signal for ML training")
     print(f"  → scheduling retry with different offer in ~15 min")
     return {"message": "Got it — we'll find a better moment"}
+
+
+# ── User endpoints ────────────────────────────────────────────────────────────
+
+@app.get("/user/{user_id}/wallet")
+def get_user_wallet(user_id: str):
+    print(f"\n[USER] get_wallet called")
+    print(f"  user_id : {user_id}")
+    
+    # Get or initialize wallet
+    if user_id not in user_wallets:
+        user_wallets[user_id] = 0.0
+    
+    balance = user_wallets[user_id]
+    print(f"  → wallet balance: €{balance:.2f}")
+    
+    return {
+        "user_id": user_id,
+        "balance": round(balance, 2),
+        "currency": "EUR",
+    }
 
 
 # ── Merchant endpoints ────────────────────────────────────────────────────────
