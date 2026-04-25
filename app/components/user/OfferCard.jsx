@@ -1,130 +1,106 @@
-import { useState } from 'react'
-import { C } from '../../constants'
+import { motion } from 'motion/react'
 
-export default function OfferCard({ offer, onClaim, onDismiss }) {
-  const [pressed, setPressed] = useState(false)
+const COFFEE_IMG = 'https://images.unsplash.com/photo-1541167760496-162955ed8a9f?auto=format&fit=crop&q=80&w=600'
 
-  if (!offer) {
-    return (
-      <div style={{ padding: '40px 16px', textAlign: 'center', color: C.gray, fontSize: 14 }}>
-        Finding offers near you…
-      </div>
-    )
-  }
-
-  const { emoji, headline, discount, merchant, distance_m, reason } = offer
+export default function OfferCard({ offer, onAccept, onReject }) {
+  const validSeconds = (offer?.valid_minutes ?? 30) * 60
 
   return (
-    <div className="anim-fade-in-up" style={{
-      margin: '6px 16px 0',
-      background: 'white',
-      borderRadius: 20,
+    <div style={{
       overflow: 'hidden',
-      boxShadow: '0 6px 28px rgba(27,42,74,0.14)',
+      borderRadius: 20,
+      border: '1px solid #f4f4f5',
+      background: 'white',
+      boxShadow: '0 20px 50px rgba(0,0,0,0.12)',
     }}>
-      <div style={{
-        background: `linear-gradient(150deg, ${C.navyDim} 0%, ${C.navy} 100%)`,
-        padding: '28px 24px 22px',
-        textAlign: 'center',
-        position: 'relative',
-      }}>
-        <div style={{ position: 'absolute', top: 12, right: 20, fontSize: 18, opacity: 0.3 }}>🌧</div>
-        <div style={{ fontSize: 52, marginBottom: 10 }}>{emoji}</div>
-        <h2 style={{ color: 'white', fontSize: 20, fontWeight: 800, lineHeight: 1.35, letterSpacing: '-0.4px' }}>
-          {headline}
-        </h2>
+      {/* Countdown progress bar */}
+      <div style={{ height: 6, background: '#f4f4f5', width: '100%' }}>
+        <motion.div
+          initial={{ width: '100%' }}
+          animate={{ width: '0%' }}
+          transition={{ duration: validSeconds, ease: 'linear' }}
+          style={{ height: '100%', background: '#0058bc' }}
+        />
+      </div>
+
+      {/* Hero image */}
+      <div style={{ position: 'relative', height: 176 }}>
+        <img
+          src={COFFEE_IMG}
+          alt="Offer"
+          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+        />
         <div style={{
-          display: 'inline-block',
-          marginTop: 14,
-          background: C.amber,
-          color: C.navy,
-          borderRadius: 12,
-          padding: '7px 18px',
-          fontSize: 15,
-          fontWeight: 800,
-          letterSpacing: '-0.2px',
+          position: 'absolute',
+          top: 16,
+          right: 16,
+          background: 'rgba(255,255,255,0.9)',
+          backdropFilter: 'blur(8px)',
+          borderRadius: 999,
+          padding: '6px 12px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
         }}>
-          {discount}
+          <span style={{ fontSize: 12, fontWeight: 700, color: '#0058bc' }}>
+            {offer.distance_m}m away
+          </span>
         </div>
       </div>
 
-      <div style={{ padding: '18px 20px 20px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
-          <div>
-            <div style={{ fontWeight: 700, color: C.navy, fontSize: 16 }}>{merchant}</div>
-            <div style={{ color: C.gray, fontSize: 13, marginTop: 2 }}>📍 {distance_m}m away</div>
-          </div>
-          <div style={{
-            background: '#EFF6FF',
-            borderRadius: 10,
-            padding: '6px 12px',
-            fontSize: 12,
-            color: '#2563EB',
-            fontWeight: 700,
-            border: '1px solid #DBEAFE',
-          }}>
-            Open now
-          </div>
-        </div>
-
-        <div style={{
-          background: '#FFFBEB',
-          border: '1px solid #FDE68A',
-          borderRadius: 10,
-          padding: '9px 13px',
-          fontSize: 12,
-          color: '#92400E',
-          fontWeight: 500,
-          marginBottom: 18,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
+      {/* Text content */}
+      <div style={{ padding: '24px' }}>
+        <p style={{
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: '0.15em',
+          textTransform: 'uppercase',
+          color: '#46464a',
+          marginBottom: 8,
         }}>
-          <span>⏱</span>
-          <span>{reason}</span>
+          Exclusive Offer Nearby: {offer.merchant}
+        </p>
+        <h2 style={{
+          fontSize: 22,
+          fontWeight: 700,
+          lineHeight: 1.3,
+          color: '#030304',
+          letterSpacing: '-0.3px',
+        }}>
+          {offer.discount}
+        </h2>
+
+        <div style={{ marginTop: 32, display: 'flex', alignItems: 'center', gap: 16 }}>
+          <button
+            onClick={onAccept}
+            style={{
+              flex: 1,
+              background: '#030304',
+              color: 'white',
+              border: 'none',
+              borderRadius: 14,
+              padding: '16px',
+              fontSize: 14,
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            }}
+          >
+            Accept
+          </button>
+          <button
+            onClick={onReject}
+            style={{
+              padding: '16px',
+              fontSize: 14,
+              fontWeight: 700,
+              color: '#46464a',
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            Reject
+          </button>
         </div>
-
-        <button
-          onClick={onClaim}
-          onMouseDown={() => setPressed(true)}
-          onMouseUp={() => setPressed(false)}
-          onMouseLeave={() => setPressed(false)}
-          onTouchStart={() => setPressed(true)}
-          onTouchEnd={() => setPressed(false)}
-          style={{
-            width: '100%',
-            background: C.amber,
-            color: C.navy,
-            border: 'none',
-            borderRadius: 14,
-            padding: '15px',
-            fontSize: 16,
-            fontWeight: 800,
-            cursor: 'pointer',
-            letterSpacing: '-0.2px',
-            boxShadow: pressed ? '0 2px 6px rgba(245,166,35,0.3)' : '0 4px 16px rgba(245,166,35,0.45)',
-            transform: pressed ? 'scale(0.975)' : 'scale(1)',
-            transition: 'transform 0.1s, box-shadow 0.1s',
-          }}
-        >
-          Claim Offer
-        </button>
-
-        <button
-          onClick={onDismiss}
-          style={{
-            width: '100%',
-            background: 'transparent',
-            border: 'none',
-            color: C.gray,
-            fontSize: 13,
-            padding: '11px',
-            cursor: 'pointer',
-            marginTop: 2,
-          }}
-        >
-          Not now
-        </button>
       </div>
     </div>
   )

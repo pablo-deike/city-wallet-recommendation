@@ -1,53 +1,85 @@
-import { C } from '../../constants'
-
-export default function SuccessScreen({ result }) {
+export default function SuccessScreen({ result, onDone }) {
   return (
-    <div className="anim-scale-in" style={{ padding: '16px 16px 0' }}>
-      <div style={{
-        background: 'white',
-        borderRadius: 20,
-        padding: '40px 24px',
-        boxShadow: '0 6px 28px rgba(27,42,74,0.12)',
-        textAlign: 'center',
-      }}>
-        <div className="anim-pop-in" style={{ fontSize: 64, display: 'inline-block', marginBottom: 16 }}>
-          ✅
-        </div>
-        <h2 style={{ fontSize: 22, fontWeight: 800, color: C.navy, marginBottom: 8, letterSpacing: '-0.4px' }}>
+    <div style={{
+      padding: '48px 24px 32px',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      gap: 24,
+      minHeight: '100%',
+    }}>
+      <div style={{ fontSize: 72, lineHeight: 1 }}>✅</div>
+
+      <div style={{ textAlign: 'center' }}>
+        <h2 style={{
+          fontSize: 28,
+          fontWeight: 800,
+          color: '#030304',
+          letterSpacing: '-0.5px',
+          marginBottom: 8,
+        }}>
           Enjoy your drink!
         </h2>
-        <p style={{ fontSize: 15, color: C.gray, marginBottom: 24, lineHeight: 1.5 }}>
+        <p style={{ fontSize: 15, color: '#46464a', lineHeight: 1.6 }}>
           The barista has redeemed your offer.
         </p>
-
-        {result && (
-          <>
-            <div style={{
-              background: '#F0FDF4',
-              border: '1px solid #86EFAC',
-              borderRadius: 14,
-              padding: '16px',
-              fontSize: 15,
-              color: '#166534',
-              fontWeight: 600,
-              marginBottom: 16,
-            }}>
-              💰 Cashback of €{result.cashback_earned.toFixed(2)} added to your wallet
-            </div>
-            <div style={{
-              background: '#F8F9FC',
-              borderRadius: 12,
-              padding: '12px 16px',
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}>
-              <span style={{ fontSize: 13, color: C.gray }}>New wallet balance</span>
-              <span style={{ fontSize: 18, fontWeight: 800, color: C.navy }}>€{result.new_balance.toFixed(2)}</span>
-            </div>
-          </>
-        )}
       </div>
+
+      {result && (
+        <div style={{
+          width: '100%',
+          background: '#faf8fe',
+          border: '1px solid #f4f4f5',
+          borderRadius: 20,
+          padding: '20px 24px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+        }}>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '10px 0',
+            borderBottom: '1px solid #f4f4f5',
+          }}>
+            <span style={{ fontSize: 14, color: '#46464a', fontWeight: 500 }}>Cashback earned</span>
+            <span style={{ fontSize: 16, fontWeight: 800, color: '#0058bc' }}>
+              +€{result.cashback_earned.toFixed(2)}
+            </span>
+          </div>
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '10px 0',
+          }}>
+            <span style={{ fontSize: 14, color: '#46464a', fontWeight: 500 }}>New balance</span>
+            <span style={{ fontSize: 18, fontWeight: 800, color: '#030304' }}>
+              €{result.new_balance.toFixed(2)}
+            </span>
+          </div>
+        </div>
+      )}
+
+      <button
+        onClick={onDone}
+        style={{
+          width: '100%',
+          background: '#030304',
+          color: 'white',
+          border: 'none',
+          borderRadius: 14,
+          padding: '16px',
+          fontSize: 16,
+          fontWeight: 700,
+          cursor: 'pointer',
+          marginTop: 'auto',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        }}
+      >
+        Done
+      </button>
     </div>
   )
 }

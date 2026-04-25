@@ -40,8 +40,12 @@ export function claimOffer(offerId) {
   return post(`/offers/${offerId}/claim`, { user_id: USER_ID })
 }
 
-export function redeemOffer(offerId, qrToken) {
-  return post(`/offers/${offerId}/redeem`, { user_id: USER_ID, qr_token: qrToken })
+export function redeemOffer(offerId, qrToken, purchaseAmount = 10.0) {
+  return post(`/offers/${offerId}/redeem`, { user_id: USER_ID, qr_token: qrToken, purchase_amount: purchaseAmount })
+}
+
+export function getUserWallet() {
+  return get(`/user/${USER_ID}/wallet`)
 }
 
 export function dismissOffer(offerId, reason = null) {

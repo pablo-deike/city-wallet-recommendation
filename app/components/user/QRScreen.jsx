@@ -1,5 +1,4 @@
 import { useState, useEffect } from 'react'
-import { C } from '../../constants'
 import QRCode from '../../QRCode'
 
 export default function QRScreen({ qrData, onMarkUsed }) {
@@ -16,82 +15,79 @@ export default function QRScreen({ qrData, onMarkUsed }) {
 
   const mm = String(Math.floor(secs / 60)).padStart(2, '0')
   const ss = String(secs % 60).padStart(2, '0')
-  const urgent = secs < 120
+  const urgent = secs < 60
 
   return (
-    <div className="anim-slide-up" style={{ padding: '16px 16px 0' }}>
-      <div style={{
-        background: 'white',
-        borderRadius: 20,
-        padding: '22px 20px 20px',
-        boxShadow: '0 6px 28px rgba(27,42,74,0.12)',
-        textAlign: 'center',
-      }}>
-        <div style={{
+    <div style={{
+      padding: '32px 20px 28px',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 24,
+      minHeight: '100%',
+    }}>
+      <div style={{ textAlign: 'center' }}>
+        <p style={{
           fontSize: 11,
           fontWeight: 700,
-          color: C.gray,
-          letterSpacing: '1px',
+          letterSpacing: '0.15em',
           textTransform: 'uppercase',
-          marginBottom: 18,
+          color: '#46464a',
+          marginBottom: 6,
         }}>
           Show this at the counter
-        </div>
-
-        <QRCode />
-
-        <div style={{
-          marginTop: 18,
-          background: '#F8F9FC',
-          borderRadius: 12,
-          padding: '13px 16px',
-          marginBottom: 16,
-        }}>
-          {qrData && (
-            <div style={{ fontWeight: 700, color: C.navy, fontSize: 15 }}>
-              {qrData.merchant} — {qrData.discount}
-            </div>
-          )}
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 8,
-            marginTop: 8,
-          }}>
-            <span style={{ fontSize: 12, color: C.gray, fontWeight: 500 }}>Expires in</span>
-            <span style={{
-              fontSize: 26,
-              fontWeight: 800,
-              color: urgent ? C.danger : C.navy,
-              fontVariantNumeric: 'tabular-nums',
-              letterSpacing: '2px',
-              fontFeatureSettings: '"tnum"',
-              transition: 'color 0.3s',
-            }}>
-              {mm}:{ss}
-            </span>
-          </div>
-        </div>
-
-        <button
-          onClick={onMarkUsed}
-          style={{
-            width: '100%',
-            background: C.navy,
-            color: 'white',
-            border: 'none',
-            borderRadius: 14,
-            padding: '15px',
-            fontSize: 16,
-            fontWeight: 700,
-            cursor: 'pointer',
-            letterSpacing: '-0.2px',
-          }}
-        >
-          Mark as Used
-        </button>
+        </p>
+        {qrData && (
+          <p style={{ fontSize: 18, fontWeight: 700, color: '#030304', letterSpacing: '-0.3px' }}>
+            {qrData.merchant} — {qrData.discount}
+          </p>
+        )}
       </div>
+
+      <div style={{ display: 'flex', justifyContent: 'center' }}>
+        <QRCode />
+      </div>
+
+      <div style={{
+        background: '#faf8fe',
+        border: '1px solid #f4f4f5',
+        borderRadius: 16,
+        padding: '16px 20px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+      }}>
+        <span style={{ fontSize: 14, color: '#46464a', fontWeight: 500 }}>Expires in</span>
+        <span style={{
+          fontSize: 28,
+          fontWeight: 800,
+          color: urgent ? '#ba1a1a' : '#030304',
+          fontVariantNumeric: 'tabular-nums',
+          letterSpacing: '2px',
+          fontFeatureSettings: '"tnum"',
+          transition: 'color 0.3s',
+        }}>
+          {mm}:{ss}
+        </span>
+      </div>
+
+      <button
+        onClick={onMarkUsed}
+        style={{
+          width: '100%',
+          background: '#030304',
+          color: 'white',
+          border: 'none',
+          borderRadius: 14,
+          padding: '16px',
+          fontSize: 16,
+          fontWeight: 700,
+          cursor: 'pointer',
+          marginTop: 'auto',
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        }}
+      >
+        Mark as Used
+      </button>
     </div>
   )
 }

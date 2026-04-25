@@ -1,16 +1,14 @@
 import { useState } from 'react'
 import UserView from './components/user/UserView'
 import MerchantView from './components/merchant/MerchantView'
-import TabBar from './TabBar'
 
 export default function App() {
-  const [tab, setTab] = useState('user')
+  const [view, setView] = useState('user')
 
   return (
     <>
-      {tab === 'user'     && <UserView     key="user"     />}
-      {tab === 'merchant' && <MerchantView key="merchant" />}
-      <TabBar active={tab} onSwitch={setTab} />
+      {view === 'user'     && <UserView     onGoToMerchant={() => setView('merchant')} />}
+      {view === 'merchant' && <MerchantView onBack={() => setView('user')} />}
     </>
   )
 }

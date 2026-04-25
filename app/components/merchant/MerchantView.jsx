@@ -6,7 +6,7 @@ import LiveStats from './LiveStats'
 import OfferFeed from './OfferFeed'
 import RuleModal from './RuleModal'
 
-export default function MerchantView() {
+export default function MerchantView({ onBack }) {
   const [showModal, setShowModal] = useState(false)
   const [sliders,   setSliders]   = useState(null)
   const [stats,     setStats]     = useState(null)
@@ -44,8 +44,25 @@ export default function MerchantView() {
         padding: '20px 16px 26px',
         flexShrink: 0,
       }}>
-        <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: 600, letterSpacing: '1px', marginBottom: 4 }}>
-          MERCHANT DASHBOARD
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+          <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: 600, letterSpacing: '1px' }}>
+            MERCHANT DASHBOARD
+          </div>
+          <button
+            onClick={onBack}
+            style={{
+              background: 'rgba(255,255,255,0.15)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: 20,
+              padding: '4px 12px',
+              fontSize: 12,
+              fontWeight: 600,
+              color: 'white',
+              cursor: 'pointer',
+            }}
+          >
+            ← Back
+          </button>
         </div>
         <div style={{ color: 'white', fontSize: 22, fontWeight: 800, letterSpacing: '-0.4px' }}>
           Café Müller ☕
