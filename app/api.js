@@ -1,7 +1,7 @@
 const BASE = 'http://localhost:8000'
 
 const USER_ID     = 'user_mia'
-const MERCHANT_ID = 'cafe_muller'
+const MERCHANT_ID = 'cafe_mueller'
 
 async function post(path, body) {
   const res = await fetch(`${BASE}${path}`, {

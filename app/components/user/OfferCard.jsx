@@ -4,16 +4,15 @@ import { C } from '../../constants'
 export default function OfferCard({ offer, onClaim, onDismiss }) {
   const [pressed, setPressed] = useState(false)
 
-  const emoji      = offer?.emoji      ?? '☕'
-  const headline   = offer?.headline   ?? 'Cold outside?\nYour cappuccino is waiting.'
-  const discount   = offer?.discount   ?? '15% off any hot drink'
-  const merchant   = offer?.merchant   ?? 'Café Müller'
-  const distanceM  = offer?.distance_m ?? 80
-  const reason     = offer?.reason     ?? 'Quiet right now — offer valid for 18 minutes'
+  if (!offer) {
+    return (
+      <div style={{ padding: '40px 16px', textAlign: 'center', color: C.gray, fontSize: 14 }}>
+        Finding offers near you…
+      </div>
+    )
+  }
 
-  const [line1, line2] = headline.includes('\n')
-    ? headline.split('\n')
-    : [headline, null]
+  const { emoji, headline, discount, merchant, distance_m, reason } = offer
 
   return (
     <div className="anim-fade-in-up" style={{
@@ -29,18 +28,10 @@ export default function OfferCard({ offer, onClaim, onDismiss }) {
         textAlign: 'center',
         position: 'relative',
       }}>
-        <div style={{ position: 'absolute', top: 12, right: 20, fontSize: 18, opacity: 0.3 }}>
-          🌧
-        </div>
+        <div style={{ position: 'absolute', top: 12, right: 20, fontSize: 18, opacity: 0.3 }}>🌧</div>
         <div style={{ fontSize: 52, marginBottom: 10 }}>{emoji}</div>
-        <h2 style={{
-          color: 'white',
-          fontSize: 20,
-          fontWeight: 800,
-          lineHeight: 1.35,
-          letterSpacing: '-0.4px',
-        }}>
-          {line1}{line2 && <><br />{line2}</>}
+        <h2 style={{ color: 'white', fontSize: 20, fontWeight: 800, lineHeight: 1.35, letterSpacing: '-0.4px' }}>
+          {headline}
         </h2>
         <div style={{
           display: 'inline-block',
@@ -58,15 +49,10 @@ export default function OfferCard({ offer, onClaim, onDismiss }) {
       </div>
 
       <div style={{ padding: '18px 20px 20px' }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginBottom: 14,
-        }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
           <div>
             <div style={{ fontWeight: 700, color: C.navy, fontSize: 16 }}>{merchant}</div>
-            <div style={{ color: C.gray, fontSize: 13, marginTop: 2 }}>📍 {distanceM}m away</div>
+            <div style={{ color: C.gray, fontSize: 13, marginTop: 2 }}>📍 {distance_m}m away</div>
           </div>
           <div style={{
             background: '#EFF6FF',
@@ -116,9 +102,7 @@ export default function OfferCard({ offer, onClaim, onDismiss }) {
             fontWeight: 800,
             cursor: 'pointer',
             letterSpacing: '-0.2px',
-            boxShadow: pressed
-              ? '0 2px 6px rgba(245,166,35,0.3)'
-              : '0 4px 16px rgba(245,166,35,0.45)',
+            boxShadow: pressed ? '0 2px 6px rgba(245,166,35,0.3)' : '0 4px 16px rgba(245,166,35,0.45)',
             transform: pressed ? 'scale(0.975)' : 'scale(1)',
             transition: 'transform 0.1s, box-shadow 0.1s',
           }}

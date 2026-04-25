@@ -3,11 +3,10 @@ import { C } from '../../constants'
 import QRCode from '../../QRCode'
 
 export default function QRScreen({ qrData, onMarkUsed }) {
-  const initialSecs = qrData?.expires_in_seconds ?? 17 * 60 + 43
-  const [secs, setSecs] = useState(initialSecs)
+  const [secs, setSecs] = useState(qrData?.expires_in_seconds ?? 0)
 
   useEffect(() => {
-    setSecs(qrData?.expires_in_seconds ?? 17 * 60 + 43)
+    if (qrData?.expires_in_seconds != null) setSecs(qrData.expires_in_seconds)
   }, [qrData])
 
   useEffect(() => {
@@ -18,9 +17,6 @@ export default function QRScreen({ qrData, onMarkUsed }) {
   const mm = String(Math.floor(secs / 60)).padStart(2, '0')
   const ss = String(secs % 60).padStart(2, '0')
   const urgent = secs < 120
-
-  const merchant = qrData?.merchant ?? 'Café Müller'
-  const discount = qrData?.discount ?? '15% off'
 
   return (
     <div className="anim-slide-up" style={{ padding: '16px 16px 0' }}>
@@ -51,9 +47,11 @@ export default function QRScreen({ qrData, onMarkUsed }) {
           padding: '13px 16px',
           marginBottom: 16,
         }}>
-          <div style={{ fontWeight: 700, color: C.navy, fontSize: 15 }}>
-            {merchant} — {discount}
-          </div>
+          {qrData && (
+            <div style={{ fontWeight: 700, color: C.navy, fontSize: 15 }}>
+              {qrData.merchant} — {qrData.discount}
+            </div>
+          )}
           <div style={{
             display: 'flex',
             alignItems: 'center',

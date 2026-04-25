@@ -8,13 +8,9 @@ import RuleModal from './RuleModal'
 
 export default function MerchantView() {
   const [showModal, setShowModal] = useState(false)
-  const [sliders, setSliders] = useState({
-    maxDiscount:    20,
-    quietThreshold: 5,
-    offerDuration:  18,
-  })
-  const [stats,  setStats]  = useState(null)
-  const [offers, setOffers] = useState(null)
+  const [sliders,   setSliders]   = useState(null)
+  const [stats,     setStats]     = useState(null)
+  const [offers,    setOffers]    = useState(null)
 
   useEffect(() => {
     getMerchantStats().then(setStats).catch(() => {})
@@ -22,9 +18,9 @@ export default function MerchantView() {
     getMerchantRules().then(data => {
       if (!data) return
       setSliders({
-        maxDiscount:    data.max_discount    ?? 20,
-        quietThreshold: data.quiet_threshold ?? 5,
-        offerDuration:  data.offer_duration  ?? 18,
+        maxDiscount:    data.max_discount,
+        quietThreshold: data.quiet_threshold,
+        offerDuration:  data.offer_duration,
       })
     }).catch(() => {})
   }, [])
@@ -43,7 +39,6 @@ export default function MerchantView() {
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
       <div style={{
         background: `linear-gradient(160deg, ${C.navyDim} 0%, ${C.navy} 100%)`,
         padding: '20px 16px 26px',
@@ -74,12 +69,12 @@ export default function MerchantView() {
       </div>
 
       <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 24 }}>
-        <RulePanel sliders={sliders} onEditClick={() => setShowModal(true)} />
+        {sliders && <RulePanel sliders={sliders} onEditClick={() => setShowModal(true)} />}
         <LiveStats stats={stats} />
         <OfferFeed offers={offers} />
       </div>
 
-      {showModal && (
+      {showModal && sliders && (
         <RuleModal
           sliders={sliders}
           setSliders={setSliders}

@@ -8,9 +8,9 @@ import SuccessScreen from './SuccessScreen'
 import DismissToast from './DismissToast'
 
 export default function UserView() {
-  const [screen, setScreen] = useState('offer') // 'offer' | 'qr' | 'success' | 'dismissed'
-  const [offer,       setOffer]       = useState(null)
-  const [qrData,      setQrData]      = useState(null)
+  const [screen,       setScreen]       = useState('offer')
+  const [offer,        setOffer]        = useState(null)
+  const [qrData,       setQrData]       = useState(null)
   const [redeemResult, setRedeemResult] = useState(null)
 
   useEffect(() => {
@@ -24,25 +24,21 @@ export default function UserView() {
   }, [screen])
 
   async function handleClaim() {
-    const offerId = offer?.offer_id ?? 'offer_001'
     try {
-      const data = await claimOffer(offerId)
+      const data = await claimOffer(offer.offer_id)
       setQrData(data)
     } catch {}
     setScreen('qr')
   }
 
   async function handleDismiss() {
-    const offerId = offer?.offer_id ?? 'offer_001'
-    dismissOffer(offerId).catch(() => {})
+    dismissOffer(offer.offer_id).catch(() => {})
     setScreen('dismissed')
   }
 
   async function handleMarkUsed() {
-    const offerId = offer?.offer_id ?? 'offer_001'
-    const token   = qrData?.qr_token ?? `QR-${offerId.toUpperCase()}-USER_MIA`
     try {
-      const data = await redeemOffer(offerId, token)
+      const data = await redeemOffer(offer.offer_id, qrData.qr_token)
       setRedeemResult(data)
     } catch {}
     setScreen('success')
@@ -50,7 +46,6 @@ export default function UserView() {
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
-      {/* Android-style status bar */}
       <div style={{
         background: C.navy,
         padding: '8px 16px 6px',
@@ -63,7 +58,6 @@ export default function UserView() {
         <span style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, letterSpacing: 1 }}>▲ ◉ 🔋</span>
       </div>
 
-      {/* Wallet header */}
       <div style={{
         background: `linear-gradient(160deg, ${C.navyDim} 0%, ${C.navy} 100%)`,
         padding: '14px 16px 22px',
@@ -101,13 +95,7 @@ export default function UserView() {
       <ContextBar />
 
       <div style={{ padding: '0 16px 6px', flexShrink: 0 }}>
-        <div style={{
-          fontSize: 11,
-          color: C.gray,
-          fontWeight: 700,
-          letterSpacing: '1px',
-          textTransform: 'uppercase',
-        }}>
+        <div style={{ fontSize: 11, color: C.gray, fontWeight: 700, letterSpacing: '1px', textTransform: 'uppercase' }}>
           Generated for you
         </div>
       </div>
