@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import math
+from datetime import datetime
 
 app = FastAPI(title="City Wallet API")
 
@@ -38,28 +40,106 @@ class UpdateRulesPayload(BaseModel):
     offer_duration: int
 
 
+# ── Data stores ──────────────────────────────────────────────────────────────
+
+# Merchant database with locations and rules
+merchants_db = {
+    "cafe_mueller": {
+        "name": "Café Müller",
+        "lat": 52.5200,
+        "lon": 13.4050,
+        "offers": [
+            {"type": "cold_weather", "discount": "15% off any hot drink", "emoji": "☕"},
+            {"type": "quiet_hours", "discount": "20% off pastry + drink", "emoji": "🥐"},
+        ],
+        "max_discount": 20,
+        "quiet_threshold": 5,
+        "offer_duration": 18,
+    },
+    "pizza_place": {
+        "name": "Pizzeria Napoli",
+        "lat": 52.5210,
+        "lon": 13.4060,
+        "offers": [
+            {"type": "quiet_hours", "discount": "10% off lunch special", "emoji": "🍕"},
+        ],
+        "max_discount": 15,
+        "quiet_threshold": 8,
+        "offer_duration": 20,
+    },
+}
+
+# Store active offers to retrieve correct merchant/discount on claim
+offers_store = {}
+
+# Track merchant statistics and rules
+merchant_stats = {}
+merchant_rules = {}
+
+
 # ── Offer endpoints ───────────────────────────────────────────────────────────
 
 @app.post("/offers/generate")
 def generate_offer(ctx: ContextPayload):
+    
     print(f"\n[OFFERS] generate_offer called")
     print(f"  user_id     : {ctx.user_id}")
     print(f"  location    : ({ctx.lat}, {ctx.lon})")
     print(f"  weather     : {ctx.weather}, {ctx.temperature}°C")
     print(f"  → running AI offer engine...")
-    print(f"  → nearest merchant: Café Müller (80m)")
-    print(f"  → trigger: quiet hours + cold weather match")
-    print(f"  → generated: 15% off any hot drink, valid 18 min")
-    return {
-        "offer_id": "offer_001",
-        "merchant": "Café Müller",
-        "distance_m": 80,
-        "headline": "Cold outside? Your cappuccino is waiting.",
-        "discount": "15% off any hot drink",
-        "reason": "Quiet right now — offer valid for 18 minutes",
-        "valid_minutes": 18,
-        "emoji": "☕",
+    
+    # Find nearest merchant based on user location
+    nearest_merchant = None
+    min_distance = float('inf')
+    
+    for merchant_id, merchant in merchants_db.items():
+        # Calculate distance using Haversine formula (simplified)
+        distance = math.sqrt((merchant["lat"] - ctx.lat)**2 + (merchant["lon"] - ctx.lon)**2) * 111  # km to meters
+        if distance < min_distance:
+            min_distance = distance
+            nearest_merchant = (merchant_id, merchant, distance)
+    
+    if not nearest_merchant:
+        return {"error": "No merchants available"}
+    
+    merchant_id, merchant, distance_m = nearest_merchant
+    print(f"  → nearest merchant: {merchant['name']} ({distance_m:.0f}m)")
+    
+    # Select offer based on context (weather, time, etc.)
+    offer_config = None
+    trigger_reason = ""
+    
+    if ctx.temperature < 5 and ctx.weather in ["cloudy", "rainy", "snowy"]:
+        offer_config = merchant["offers"][0]  # Cold weather offer
+        trigger_reason = "cold weather match"
+    else:
+        offer_config = merchant["offers"][0]  # Default to first offer
+        trigger_reason = "personalized recommendation"
+    
+    print(f"  → trigger: {trigger_reason}")
+    print(f"  → generated: {offer_config['discount']}, valid {merchant['offer_duration']} min")
+    
+    # Generate unique offer ID
+    offer_id = f"offer_{datetime.now().timestamp()}_{ctx.user_id[:4]}"
+    
+    # Create offer data
+    offer_data = {
+        "offer_id": offer_id,
+        "merchant_id": merchant_id,
+        "merchant": merchant["name"],
+        "distance_m": int(distance_m),
+        "headline": f"{offer_config['emoji']} {merchant['name']} is offering...",
+        "discount": offer_config["discount"],
+        "reason": f"Quiet right now — offer valid for {merchant['offer_duration']} minutes",
+        "valid_minutes": merchant['offer_duration'],
+        "emoji": offer_config["emoji"],
+        "created_at": datetime.now().isoformat(),
     }
+    
+    # Store the offer so claim can retrieve it
+    offers_store[offer_id] = offer_data
+    
+    return offer_data
 
 
 @app.post("/offers/{offer_id}/claim")
@@ -67,14 +147,20 @@ def claim_offer(offer_id: str, body: ClaimPayload):
     print(f"\n[OFFERS] claim_offer called")
     print(f"  offer_id : {offer_id}")
     print(f"  user_id  : {body.user_id}")
+    
+    # Look up the stored offer to get correct merchant and discount
+    offer = offers_store.get(offer_id)
+    if not offer:
+        return {"error": "Offer not found or expired"}
+    
     print(f"  → generating QR token...")
     print(f"  → QR token: QR-{offer_id.upper()}-{body.user_id.upper()[:6]}")
-    print(f"  → offer locked to user, countdown started (17:43)")
+    print(f"  → offer locked to user, countdown started (2:00)")
     return {
         "qr_token": f"QR-{offer_id.upper()}-{body.user_id.upper()[:6]}",
-        "expires_in_seconds": 1063,
-        "merchant": "Café Müller",
-        "discount": "15% off",
+        "expires_in_seconds": 120,
+        "merchant": offer["merchant"], 
+        "discount": offer["discount"],  
     }
 
 
@@ -114,14 +200,35 @@ def dismiss_offer(offer_id: str, body: DismissPayload):
 def get_merchant_stats(merchant_id: str):
     print(f"\n[MERCHANT] get_stats called")
     print(f"  merchant_id : {merchant_id}")
-    print(f"  → querying offers sent today: 12")
-    print(f"  → computing accept rate: 8/12 = 67%")
-    print(f"  → summing cashback issued: €5.40")
+    
+    # Verify merchant exists
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    merchant = merchants_db[merchant_id]
+    
+    # Get or initialize stats for this merchant
+    if merchant_id not in merchant_stats:
+        merchant_stats[merchant_id] = {
+            "offers_sent": 0,
+            "offers_accepted": 0,
+            "cashback_issued": 0.0,
+        }
+    
+    stats = merchant_stats[merchant_id]
+    accept_rate = stats["offers_accepted"] / stats["offers_sent"] if stats["offers_sent"] > 0 else 0
+    
+    print(f"  → querying offers sent today: {stats['offers_sent']}")
+    print(f"  → computing accept rate: {stats['offers_accepted']}/{stats['offers_sent']} = {accept_rate*100:.0f}%")
+    print(f"  → summing cashback issued: €{stats['cashback_issued']:.2f}")
+    
     return {
         "merchant_id": merchant_id,
-        "offers_sent_today": 12,
-        "accept_rate": 0.67,
-        "cashback_issued": 5.40,
+        "merchant_name": merchant["name"],
+        "offers_sent_today": stats["offers_sent"],
+        "offers_accepted": stats["offers_accepted"],
+        "accept_rate": accept_rate,
+        "cashback_issued": stats["cashback_issued"],
     }
 
 
@@ -129,16 +236,32 @@ def get_merchant_stats(merchant_id: str):
 def get_offer_feed(merchant_id: str):
     print(f"\n[MERCHANT] get_offer_feed called")
     print(f"  merchant_id : {merchant_id}")
-    print(f"  → fetching last 5 generated offers")
+    
+    # Verify merchant exists
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    # Get actual offers generated for this merchant
+    merchant_offers = []
+    for offer_id, offer in offers_store.items():
+        if offer.get("merchant_id") == merchant_id:
+            # Determine status based on whether it's claimed
+            status = "Generated"  # Could be enhanced with actual tracking
+            merchant_offers.append({
+                "offer_id": offer_id,
+                "time": offer.get("created_at", ""),
+                "offer": offer.get("discount", ""),
+                "status": status,
+                "distance": f"{offer.get('distance_m', 0)}m",
+            })
+    
+    # If no offers yet, show empty
+    print(f"  → fetching last 5 generated offers for {merchant_id}")
+    
     return {
         "merchant_id": merchant_id,
-        "offers": [
-            {"time": "12:41", "offer": "15% off any hot drink",  "status": "Accepted", "distance": "80m"},
-            {"time": "12:38", "offer": "10% off lunch special",  "status": "Declined", "distance": "150m"},
-            {"time": "12:35", "offer": "20% off pastry + drink", "status": "Accepted", "distance": "45m"},
-            {"time": "12:29", "offer": "15% off any hot drink",  "status": "Pending",  "distance": "120m"},
-            {"time": "12:22", "offer": "10% off any purchase",   "status": "Accepted", "distance": "60m"},
-        ],
+        "total_offers": len(merchant_offers),
+        "offers": merchant_offers[-5:] if merchant_offers else [],  # Last 5
     }
 
 
@@ -146,12 +269,30 @@ def get_offer_feed(merchant_id: str):
 def get_merchant_rules(merchant_id: str):
     print(f"\n[MERCHANT] get_rules called")
     print(f"  merchant_id : {merchant_id}")
-    print(f"  → loading active rule config")
+    
+    # Verify merchant exists
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    merchant = merchants_db[merchant_id]
+    
+    # Get current rules (or use defaults from merchants_db)
+    if merchant_id not in merchant_rules:
+        merchant_rules[merchant_id] = {
+            "max_discount": merchant["max_discount"],
+            "quiet_threshold": merchant["quiet_threshold"],
+            "offer_duration": merchant["offer_duration"],
+        }
+    
+    rules = merchant_rules[merchant_id]
+    print(f"  → loading active rule config for {merchant['name']}")
+    
     return {
         "merchant_id": merchant_id,
-        "max_discount": 20,
-        "quiet_threshold": 5,
-        "offer_duration": 18,
+        "merchant_name": merchant["name"],
+        "max_discount": rules["max_discount"],
+        "quiet_threshold": rules["quiet_threshold"],
+        "offer_duration": rules["offer_duration"],
         "goal": "fill seats during quiet periods",
     }
 
@@ -163,9 +304,36 @@ def update_merchant_rules(merchant_id: str, body: UpdateRulesPayload):
     print(f"  max_discount    : {body.max_discount}%")
     print(f"  quiet_threshold : {body.quiet_threshold} customers/hr")
     print(f"  offer_duration  : {body.offer_duration} minutes")
+    
+    # Verify merchant exists
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    # Validate constraints
+    if body.max_discount < 0 or body.max_discount > 100:
+        return {"error": "max_discount must be between 0 and 100"}
+    if body.quiet_threshold < 0:
+        return {"error": "quiet_threshold cannot be negative"}
+    if body.offer_duration < 1:
+        return {"error": "offer_duration must be at least 1 minute"}
+    
     print(f"  → validating rule constraints... ✓")
+    
+    # Save the new rules
+    merchant_rules[merchant_id] = {
+        "max_discount": body.max_discount,
+        "quiet_threshold": body.quiet_threshold,
+        "offer_duration": body.offer_duration,
+    }
+    
+    # Update the merchants_db as well for future offers
+    merchants_db[merchant_id]["max_discount"] = body.max_discount
+    merchants_db[merchant_id]["quiet_threshold"] = body.quiet_threshold
+    merchants_db[merchant_id]["offer_duration"] = body.offer_duration
+    
     print(f"  → saving new rule config")
     print(f"  → AI engine will use updated rules on next trigger")
+    
     return {
         "success": True,
         "merchant_id": merchant_id,
