@@ -35,6 +35,53 @@ body {
   pointer-events: none;
 }
 
+/* ── Leaflet map ── */
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+}
+.leaflet-tile-pane {
+  filter: grayscale(1) contrast(0.75) brightness(1.1);
+}
+.leaflet-control-attribution {
+  font-size: 9px !important;
+  opacity: 0.5;
+}
+
+/* User location marker */
+.user-marker-dot {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #0058bc;
+  border: 3px solid white;
+  box-shadow: 0 4px 16px rgba(0, 88, 188, 0.45);
+  z-index: 1;
+}
+.user-marker-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #0058bc;
+  opacity: 0.22;
+  animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* Café location marker */
+.cafe-marker {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: white;
+  border: 3px solid #0058bc;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
+}
+
 input[type='range'] {
   -webkit-appearance: none;
   appearance: none;

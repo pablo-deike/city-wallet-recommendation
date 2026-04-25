@@ -26,11 +26,11 @@ async function put(path, body) {
   return res.json()
 }
 
-export function generateOffer() {
+export function generateOffer(lat, lon) {
   return post('/offers/generate', {
     user_id:     USER_ID,
-    lat:         48.7758,
-    lon:         9.1829,
+    lat,
+    lon,
     weather:     'overcast',
     temperature: 11,
   })
