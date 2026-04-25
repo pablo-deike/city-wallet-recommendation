@@ -1,6 +1,9 @@
 import { C } from '../../constants'
 
-export default function SuccessScreen() {
+export default function SuccessScreen({ result }) {
+  const cashback   = result?.cashback_earned ?? 0.45
+  const newBalance = result?.new_balance     ?? 2.85
+
   return (
     <div className="anim-scale-in" style={{ padding: '16px 16px 0' }}>
       <div style={{
@@ -35,7 +38,7 @@ export default function SuccessScreen() {
           fontWeight: 600,
           marginBottom: 16,
         }}>
-          💰 Cashback of €0.45 added to your wallet
+          💰 Cashback of €{cashback.toFixed(2)} added to your wallet
         </div>
         <div style={{
           background: '#F8F9FC',
@@ -46,7 +49,7 @@ export default function SuccessScreen() {
           alignItems: 'center',
         }}>
           <span style={{ fontSize: 13, color: C.gray }}>New wallet balance</span>
-          <span style={{ fontSize: 18, fontWeight: 800, color: C.navy }}>€2.85</span>
+          <span style={{ fontSize: 18, fontWeight: 800, color: C.navy }}>€{newBalance.toFixed(2)}</span>
         </div>
       </div>
     </div>

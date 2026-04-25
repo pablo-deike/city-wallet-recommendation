@@ -1,6 +1,10 @@
 import { C, cardStyle, OFFER_FEED, STATUS_STYLE } from '../../constants'
 
-export default function OfferFeed() {
+export default function OfferFeed({ offers }) {
+  const feed = offers
+    ? offers.map(o => ({ time: o.time, offer: o.offer, status: o.status, dist: o.distance }))
+    : OFFER_FEED
+
   return (
     <div style={cardStyle}>
       <div style={{
@@ -15,8 +19,8 @@ export default function OfferFeed() {
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-        {OFFER_FEED.map((item, i) => {
-          const sc = STATUS_STYLE[item.status]
+        {feed.map((item, i) => {
+          const sc = STATUS_STYLE[item.status] ?? STATUS_STYLE.Pending
           return (
             <div key={i} style={{
               display: 'flex',

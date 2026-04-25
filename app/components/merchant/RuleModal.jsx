@@ -6,7 +6,7 @@ const FIELDS = [
   { key: 'offerDuration',  label: 'Offer Duration',  unit: ' min',     min: 5,  max: 60 },
 ]
 
-export default function RuleModal({ sliders, setSliders, onClose }) {
+export default function RuleModal({ sliders, setSliders, onClose, onSave }) {
   return (
     <div
       className="anim-fade-in"
@@ -63,7 +63,7 @@ export default function RuleModal({ sliders, setSliders, onClose }) {
         ))}
 
         <button
-          onClick={onClose}
+          onClick={() => onSave(sliders)}
           style={{
             width: '100%',
             background: C.navy,

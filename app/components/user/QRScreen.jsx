@@ -2,10 +2,13 @@ import { useState, useEffect } from 'react'
 import { C } from '../../constants'
 import QRCode from '../../QRCode'
 
-const INITIAL_SECS = 17 * 60 + 43
+export default function QRScreen({ qrData, onMarkUsed }) {
+  const initialSecs = qrData?.expires_in_seconds ?? 17 * 60 + 43
+  const [secs, setSecs] = useState(initialSecs)
 
-export default function QRScreen({ onMarkUsed }) {
-  const [secs, setSecs] = useState(INITIAL_SECS)
+  useEffect(() => {
+    setSecs(qrData?.expires_in_seconds ?? 17 * 60 + 43)
+  }, [qrData])
 
   useEffect(() => {
     const id = setInterval(() => setSecs(s => (s > 0 ? s - 1 : 0)), 1000)
@@ -15,6 +18,9 @@ export default function QRScreen({ onMarkUsed }) {
   const mm = String(Math.floor(secs / 60)).padStart(2, '0')
   const ss = String(secs % 60).padStart(2, '0')
   const urgent = secs < 120
+
+  const merchant = qrData?.merchant ?? 'Café Müller'
+  const discount = qrData?.discount ?? '15% off'
 
   return (
     <div className="anim-slide-up" style={{ padding: '16px 16px 0' }}>
@@ -46,7 +52,7 @@ export default function QRScreen({ onMarkUsed }) {
           marginBottom: 16,
         }}>
           <div style={{ fontWeight: 700, color: C.navy, fontSize: 15 }}>
-            Café Müller — 15% off
+            {merchant} — {discount}
           </div>
           <div style={{
             display: 'flex',

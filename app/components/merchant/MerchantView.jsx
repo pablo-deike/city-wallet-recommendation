@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { C } from '../../constants'
+import { getMerchantStats, getMerchantOffers, getMerchantRules, updateMerchantRules } from '../../api'
 import RulePanel from './RulePanel'
 import LiveStats from './LiveStats'
 import OfferFeed from './OfferFeed'
@@ -12,6 +13,33 @@ export default function MerchantView() {
     quietThreshold: 5,
     offerDuration:  18,
   })
+  const [stats,  setStats]  = useState(null)
+  const [offers, setOffers] = useState(null)
+
+  useEffect(() => {
+    getMerchantStats().then(setStats).catch(() => {})
+    getMerchantOffers().then(data => setOffers(data?.offers ?? null)).catch(() => {})
+    getMerchantRules().then(data => {
+      if (!data) return
+      setSliders({
+        maxDiscount:    data.max_discount    ?? 20,
+        quietThreshold: data.quiet_threshold ?? 5,
+        offerDuration:  data.offer_duration  ?? 18,
+      })
+    }).catch(() => {})
+  }, [])
+
+  async function handleSaveRules(newSliders) {
+    try {
+      await updateMerchantRules({
+        max_discount:    newSliders.maxDiscount,
+        quiet_threshold: newSliders.quietThreshold,
+        offer_duration:  newSliders.offerDuration,
+      })
+    } catch {}
+    setSliders(newSliders)
+    setShowModal(false)
+  }
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative', display: 'flex', flexDirection: 'column' }}>
@@ -47,8 +75,8 @@ export default function MerchantView() {
 
       <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 12, paddingBottom: 24 }}>
         <RulePanel sliders={sliders} onEditClick={() => setShowModal(true)} />
-        <LiveStats />
-        <OfferFeed />
+        <LiveStats stats={stats} />
+        <OfferFeed offers={offers} />
       </div>
 
       {showModal && (
@@ -56,6 +84,7 @@ export default function MerchantView() {
           sliders={sliders}
           setSliders={setSliders}
           onClose={() => setShowModal(false)}
+          onSave={handleSaveRules}
         />
       )}
     </div>

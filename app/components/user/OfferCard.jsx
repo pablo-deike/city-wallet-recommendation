@@ -1,8 +1,19 @@
 import { useState } from 'react'
 import { C } from '../../constants'
 
-export default function OfferCard({ onClaim, onDismiss }) {
+export default function OfferCard({ offer, onClaim, onDismiss }) {
   const [pressed, setPressed] = useState(false)
+
+  const emoji      = offer?.emoji      ?? '☕'
+  const headline   = offer?.headline   ?? 'Cold outside?\nYour cappuccino is waiting.'
+  const discount   = offer?.discount   ?? '15% off any hot drink'
+  const merchant   = offer?.merchant   ?? 'Café Müller'
+  const distanceM  = offer?.distance_m ?? 80
+  const reason     = offer?.reason     ?? 'Quiet right now — offer valid for 18 minutes'
+
+  const [line1, line2] = headline.includes('\n')
+    ? headline.split('\n')
+    : [headline, null]
 
   return (
     <div className="anim-fade-in-up" style={{
@@ -21,7 +32,7 @@ export default function OfferCard({ onClaim, onDismiss }) {
         <div style={{ position: 'absolute', top: 12, right: 20, fontSize: 18, opacity: 0.3 }}>
           🌧
         </div>
-        <div style={{ fontSize: 52, marginBottom: 10 }}>☕</div>
+        <div style={{ fontSize: 52, marginBottom: 10 }}>{emoji}</div>
         <h2 style={{
           color: 'white',
           fontSize: 20,
@@ -29,7 +40,7 @@ export default function OfferCard({ onClaim, onDismiss }) {
           lineHeight: 1.35,
           letterSpacing: '-0.4px',
         }}>
-          Cold outside?<br />Your cappuccino is waiting.
+          {line1}{line2 && <><br />{line2}</>}
         </h2>
         <div style={{
           display: 'inline-block',
@@ -42,7 +53,7 @@ export default function OfferCard({ onClaim, onDismiss }) {
           fontWeight: 800,
           letterSpacing: '-0.2px',
         }}>
-          15% off any hot drink
+          {discount}
         </div>
       </div>
 
@@ -54,8 +65,8 @@ export default function OfferCard({ onClaim, onDismiss }) {
           marginBottom: 14,
         }}>
           <div>
-            <div style={{ fontWeight: 700, color: C.navy, fontSize: 16 }}>Café Müller</div>
-            <div style={{ color: C.gray, fontSize: 13, marginTop: 2 }}>📍 80m away</div>
+            <div style={{ fontWeight: 700, color: C.navy, fontSize: 16 }}>{merchant}</div>
+            <div style={{ color: C.gray, fontSize: 13, marginTop: 2 }}>📍 {distanceM}m away</div>
           </div>
           <div style={{
             background: '#EFF6FF',
@@ -84,7 +95,7 @@ export default function OfferCard({ onClaim, onDismiss }) {
           gap: 6,
         }}>
           <span>⏱</span>
-          <span>Quiet right now — offer valid for 18 minutes</span>
+          <span>{reason}</span>
         </div>
 
         <button

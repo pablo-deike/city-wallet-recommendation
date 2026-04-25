@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { C } from '../../constants'
+import { generateOffer, claimOffer, redeemOffer, dismissOffer } from '../../api'
 import ContextBar from './ContextBar'
 import OfferCard from './OfferCard'
 import QRScreen from './QRScreen'
@@ -8,12 +9,44 @@ import DismissToast from './DismissToast'
 
 export default function UserView() {
   const [screen, setScreen] = useState('offer') // 'offer' | 'qr' | 'success' | 'dismissed'
+  const [offer,       setOffer]       = useState(null)
+  const [qrData,      setQrData]      = useState(null)
+  const [redeemResult, setRedeemResult] = useState(null)
+
+  useEffect(() => {
+    generateOffer().then(setOffer).catch(() => {})
+  }, [])
 
   useEffect(() => {
     if (screen !== 'dismissed') return
     const t = setTimeout(() => setScreen('offer'), 2000)
     return () => clearTimeout(t)
   }, [screen])
+
+  async function handleClaim() {
+    const offerId = offer?.offer_id ?? 'offer_001'
+    try {
+      const data = await claimOffer(offerId)
+      setQrData(data)
+    } catch {}
+    setScreen('qr')
+  }
+
+  async function handleDismiss() {
+    const offerId = offer?.offer_id ?? 'offer_001'
+    dismissOffer(offerId).catch(() => {})
+    setScreen('dismissed')
+  }
+
+  async function handleMarkUsed() {
+    const offerId = offer?.offer_id ?? 'offer_001'
+    const token   = qrData?.qr_token ?? `QR-${offerId.toUpperCase()}-USER_MIA`
+    try {
+      const data = await redeemOffer(offerId, token)
+      setRedeemResult(data)
+    } catch {}
+    setScreen('success')
+  }
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
@@ -80,10 +113,10 @@ export default function UserView() {
       </div>
 
       <div style={{ flex: 1, paddingBottom: 16 }}>
-        {screen === 'offer'     && <OfferCard onClaim={() => setScreen('qr')} onDismiss={() => setScreen('dismissed')} />}
+        {screen === 'offer'     && <OfferCard offer={offer} onClaim={handleClaim} onDismiss={handleDismiss} />}
         {screen === 'dismissed' && <DismissToast />}
-        {screen === 'qr'        && <QRScreen onMarkUsed={() => setScreen('success')} />}
-        {screen === 'success'   && <SuccessScreen />}
+        {screen === 'qr'        && <QRScreen qrData={qrData} onMarkUsed={handleMarkUsed} />}
+        {screen === 'success'   && <SuccessScreen result={redeemResult} />}
       </div>
     </div>
   )
