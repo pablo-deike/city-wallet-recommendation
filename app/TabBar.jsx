@@ -1,4 +1,4 @@
-import { C } from '../constants'
+import { C } from './constants'
 
 const TABS = [
   { key: 'user',     icon: '📱', label: "Mia's Phone"    },

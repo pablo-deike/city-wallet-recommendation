@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { C } from '../../constants'
-import QRCode from '../QRCode'
+import QRCode from '../../QRCode'
 
 const INITIAL_SECS = 17 * 60 + 43
 

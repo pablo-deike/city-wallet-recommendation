@@ -1,4 +1,4 @@
-import { C, QR_GRID } from '../constants'
+import { C, QR_GRID } from './constants'
 
 export default function QRCode() {
   return (

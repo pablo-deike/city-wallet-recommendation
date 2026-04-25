@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import UserView from './components/user/UserView'
 import MerchantView from './components/merchant/MerchantView'
-import TabBar from './components/TabBar'
+import TabBar from './TabBar'
 
 export default function App() {
   const [tab, setTab] = useState('user')
