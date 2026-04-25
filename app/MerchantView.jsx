@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react'
 import { getMerchantStats, getMerchantOffers, getMerchantRules, updateMerchantRules } from './api'
 
-const C = { navy: '#1B2A4A', navyDim: '#2D3F61', amber: '#F5A623', bg: '#F0F2F5', gray: '#6B7280', light: '#E5E7EB' }
-const card = { background: 'white', borderRadius: 16, padding: 16, boxShadow: '0 2px 14px rgba(27,42,74,0.08)' }
+const C = { text: '#111827', muted: '#6b7280', dim: '#9ca3af', accent: '#3b82f6', amber: '#b45309', surface: '#ffffff', elevated: '#f8fafc', border: '#dbe3ef' }
+const card = { background: C.surface, borderRadius: 16, padding: 16, border: `1px solid ${C.border}` }
 const STATUS = {
-  Accepted: { bg: '#F0FDF4', text: '#16A34A', border: '#BBF7D0' },
-  Declined: { bg: '#FFF1F2', text: '#E11D48', border: '#FECDD3' },
-  Pending:  { bg: '#FFFBEB', text: '#D97706', border: '#FDE68A' },
+  Accepted: { bg: '#ecfdf3', text: '#15803d', border: '#86efac' },
+  Declined: { bg: '#fef2f2', text: '#b91c1c', border: '#fca5a5' },
+  Pending:  { bg: '#fffbeb', text: '#b45309', border: '#fcd34d' },
 }
 const RULE_FIELDS = [
   { key: 'maxDiscount',    label: 'Max Discount',    unit: '%',        min: 5,  max: 40 },
@@ -36,16 +36,16 @@ export default function MerchantView({ onBack }) {
   }
 
   return (
-    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative', display: 'flex', flexDirection: 'column' }}>
+    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative', display: 'flex', flexDirection: 'column', background: '#f5f7fb' }}>
 
       {/* Header */}
-      <div style={{ background: `linear-gradient(160deg, ${C.navyDim} 0%, ${C.navy} 100%)`, padding: '20px 16px 26px', flexShrink: 0 }}>
+      <div style={{ background: 'linear-gradient(160deg, #eef5ff 0%, #f8fbff 100%)', padding: '20px 16px 26px', flexShrink: 0, borderBottom: `1px solid ${C.border}` }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-          <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11, fontWeight: 600, letterSpacing: '1px' }}>MERCHANT DASHBOARD</div>
-          <button onClick={onBack} style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.2)', borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 600, color: 'white', cursor: 'pointer' }}>← Back</button>
+          <div style={{ color: '#6b7280', fontSize: 11, fontWeight: 600, letterSpacing: '1px' }}>MERCHANT DASHBOARD</div>
+          <button onClick={onBack} style={{ background: '#ffffff', border: `1px solid ${C.border}`, borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>← Back</button>
         </div>
-        <div style={{ color: 'white', fontSize: 22, fontWeight: 800, letterSpacing: '-0.4px' }}>Café Müller ☕</div>
-        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 10, background: 'rgba(16,185,129,0.15)', border: '1px solid rgba(16,185,129,0.3)', borderRadius: 20, padding: '5px 12px', fontSize: 12, color: '#6EE7B7', fontWeight: 600 }}>
+        <div style={{ color: '#111827', fontSize: 22, fontWeight: 800, letterSpacing: '-0.4px' }}>Café Müller ☕</div>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 10, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 20, padding: '5px 12px', fontSize: 12, color: '#047857', fontWeight: 600 }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981', display: 'inline-block' }} />
           AI Offer Engine Active
         </div>
@@ -57,8 +57,8 @@ export default function MerchantView({ onBack }) {
         {sliders && (
           <div style={card}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: C.gray, letterSpacing: '1px', textTransform: 'uppercase' }}>Your Active Rule</div>
-              <button onClick={() => setShowModal(true)} style={{ background: C.bg, border: `1px solid ${C.light}`, borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 700, color: C.navy, cursor: 'pointer' }}>Edit Rule</button>
+              <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, letterSpacing: '1px', textTransform: 'uppercase' }}>Your Active Rule</div>
+              <button onClick={() => setShowModal(true)} style={{ background: C.elevated, border: `1px solid ${C.border}`, borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 700, color: C.text, cursor: 'pointer' }}>Edit Rule</button>
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {[
@@ -67,11 +67,11 @@ export default function MerchantView({ onBack }) {
                 { icon: '⏳', label: 'Offer duration', value: `${sliders.offerDuration} minutes` },
                 { icon: '🪑', label: 'Goal',           value: 'Fill seats during quiet periods' },
               ].map(({ icon, label, value }) => (
-                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', background: C.bg, borderRadius: 10 }}>
+                <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', background: C.elevated, borderRadius: 10 }}>
                   <span style={{ fontSize: 17 }}>{icon}</span>
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: 11, color: C.gray, fontWeight: 500 }}>{label}</div>
-                    <div style={{ fontSize: 13, fontWeight: 700, color: C.navy, marginTop: 1 }}>{value}</div>
+                    <div style={{ fontSize: 11, color: C.muted, fontWeight: 500 }}>{label}</div>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginTop: 1 }}>{value}</div>
                   </div>
                 </div>
               ))}
@@ -89,14 +89,14 @@ export default function MerchantView({ onBack }) {
               ].map(({ label, value, icon }) => (
                 <div key={label} style={{ ...card, padding: '14px 10px', textAlign: 'center' }}>
                   <div style={{ fontSize: 22, marginBottom: 5 }}>{icon}</div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: C.navy, letterSpacing: '-0.5px' }}>{value}</div>
-                  <div style={{ fontSize: 10, color: C.gray, fontWeight: 600, marginTop: 3 }}>{label}</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: C.accent, letterSpacing: '-0.5px' }}>{value}</div>
+                  <div style={{ fontSize: 10, color: C.muted, fontWeight: 600, marginTop: 3 }}>{label}</div>
                 </div>
               ))
             : ['📤', '✅', '💰'].map((icon, i) => (
                 <div key={i} style={{ ...card, padding: '14px 10px', textAlign: 'center' }}>
                   <div style={{ fontSize: 22, marginBottom: 5 }}>{icon}</div>
-                  <div style={{ fontSize: 20, fontWeight: 800, color: C.light }}>—</div>
+                  <div style={{ fontSize: 20, fontWeight: 800, color: C.dim }}>—</div>
                 </div>
               ))
           }
@@ -104,20 +104,20 @@ export default function MerchantView({ onBack }) {
 
         {/* Offer feed */}
         <div style={card}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: C.gray, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 12 }}>Recent Offers</div>
+          <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, letterSpacing: '1px', textTransform: 'uppercase', marginBottom: 12 }}>Recent Offers</div>
           {!offers || offers.error ? (
-            <div style={{ color: C.gray, fontSize: 13, textAlign: 'center', padding: '12px 0' }}>Loading…</div>
+            <div style={{ color: C.muted, fontSize: 13, textAlign: 'center', padding: '12px 0' }}>Loading…</div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
               {offers.map((item, i) => {
                 const sc = STATUS[item.status] ?? STATUS.Pending
                 const time = item.time?.includes('T') ? new Date(item.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : item.time
                 return (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', background: C.bg, borderRadius: 10 }}>
-                    <div style={{ color: C.gray, fontSize: 12, fontWeight: 600, minWidth: 36, fontVariantNumeric: 'tabular-nums' }}>{time}</div>
+                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', background: C.elevated, borderRadius: 10 }}>
+                    <div style={{ color: C.muted, fontSize: 12, fontWeight: 600, minWidth: 36, fontVariantNumeric: 'tabular-nums' }}>{time}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 13, fontWeight: 700, color: C.navy, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.offer}</div>
-                      <div style={{ fontSize: 11, color: C.gray, marginTop: 2 }}>📍 {item.distance}</div>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.offer}</div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>📍 {item.distance}</div>
                     </div>
                     <div style={{ background: sc.bg, border: `1px solid ${sc.border}`, color: sc.text, borderRadius: 8, padding: '4px 9px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>{item.status}</div>
                   </div>
@@ -131,21 +131,21 @@ export default function MerchantView({ onBack }) {
       {/* Rule edit modal */}
       {showModal && sliders && (
         <div onClick={e => e.target === e.currentTarget && setShowModal(false)}
-          style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'flex-end', zIndex: 200 }}
+          style={{ position: 'absolute', inset: 0, background: 'rgba(15,23,42,0.35)', display: 'flex', alignItems: 'flex-end', zIndex: 200 }}
         >
-          <div style={{ width: '100%', background: 'white', borderRadius: '24px 24px 0 0', padding: '0 24px 36px' }}>
-            <div style={{ width: 40, height: 4, background: C.light, borderRadius: 2, margin: '14px auto 20px' }} />
-            <h3 style={{ fontSize: 18, fontWeight: 800, color: C.navy, marginBottom: 24, letterSpacing: '-0.3px' }}>Edit Active Rule</h3>
+          <div style={{ width: '100%', background: C.surface, borderRadius: '24px 24px 0 0', padding: '0 24px 36px', border: `1px solid ${C.border}`, borderBottom: 'none' }}>
+            <div style={{ width: 40, height: 4, background: C.border, borderRadius: 2, margin: '14px auto 20px' }} />
+            <h3 style={{ fontSize: 18, fontWeight: 800, color: C.text, marginBottom: 24, letterSpacing: '-0.3px' }}>Edit Active Rule</h3>
             {RULE_FIELDS.map(({ key, label, unit, min, max }) => (
               <div key={key} style={{ marginBottom: 24 }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-                  <span style={{ fontSize: 14, fontWeight: 600, color: C.navy }}>{label}</span>
+                  <span style={{ fontSize: 14, fontWeight: 600, color: C.text }}>{label}</span>
                   <span style={{ fontSize: 14, fontWeight: 800, color: C.amber }}>{sliders[key]}{unit}</span>
                 </div>
                 <input type="range" min={min} max={max} value={sliders[key]} onChange={e => setSliders(prev => ({ ...prev, [key]: Number(e.target.value) }))} />
               </div>
             ))}
-            <button onClick={() => handleSave(sliders)} style={{ width: '100%', background: C.navy, color: 'white', border: 'none', borderRadius: 14, padding: 15, fontSize: 16, fontWeight: 700, cursor: 'pointer', marginTop: 4 }}>Done</button>
+            <button onClick={() => handleSave(sliders)} style={{ width: '100%', background: C.accent, color: 'white', border: 'none', borderRadius: 14, padding: 15, fontSize: 16, fontWeight: 700, cursor: 'pointer', marginTop: 4, boxShadow: '0 4px 16px rgba(91,154,245,0.3)' }}>Done</button>
           </div>
         </div>
       )}

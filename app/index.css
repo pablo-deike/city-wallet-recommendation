@@ -8,7 +8,7 @@
 
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: #c8cacc;
+  background: #eef2f7;
   min-height: 100vh;
   display: flex;
   justify-content: center;
@@ -19,10 +19,10 @@ body {
   width: 100%;
   max-width: 390px;
   height: 100vh;
-  background: #faf8fe;
+  background: #ffffff;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 0 60px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12);
   position: relative;
   overflow: hidden;
 }
@@ -35,35 +35,38 @@ body {
   pointer-events: none;
 }
 
-/* ── Leaflet map ── */
+/* ── Leaflet map (dark tile style) ── */
 .leaflet-container {
   height: 100%;
   width: 100%;
 }
 .leaflet-tile-pane {
-  filter: grayscale(1) contrast(0.75) brightness(1.1);
+  filter: saturate(0.95) contrast(1.02) brightness(1.02);
 }
 .leaflet-control-attribution {
   font-size: 9px !important;
-  opacity: 0.5;
+  opacity: 0.7;
+  background: rgba(255,255,255,0.85) !important;
+  color: #6b7280 !important;
 }
+.leaflet-control-attribution a { color: #6b7280 !important; }
 
 /* User location marker */
 .user-marker-dot {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: #0058bc;
-  border: 3px solid white;
-  box-shadow: 0 4px 16px rgba(0, 88, 188, 0.45);
+  background: #5b9af5;
+  border: 3px solid #ffffff;
+  box-shadow: 0 4px 16px rgba(91, 154, 245, 0.5);
   z-index: 1;
 }
 .user-marker-pulse {
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: #0058bc;
-  opacity: 0.22;
+  background: #5b9af5;
+  opacity: 0.25;
   animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
 }
 
@@ -72,9 +75,9 @@ body {
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: white;
-  border: 3px solid #0058bc;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+  background: #ffffff;
+  border: 3px solid #5b9af5;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -88,7 +91,7 @@ input[type='range'] {
   width: 100%;
   height: 6px;
   border-radius: 3px;
-  background: #e5e7eb;
+  background: #dbe3ef;
   outline: none;
   cursor: pointer;
 }
@@ -97,16 +100,16 @@ input[type='range']::-webkit-slider-thumb {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #0058bc;
-  box-shadow: 0 2px 6px rgba(0, 88, 188, 0.4);
+  background: #5b9af5;
+  box-shadow: 0 2px 6px rgba(91, 154, 245, 0.4);
 }
 input[type='range']::-moz-range-thumb {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #0058bc;
+  background: #5b9af5;
   border: none;
-  box-shadow: 0 2px 6px rgba(0, 88, 188, 0.4);
+  box-shadow: 0 2px 6px rgba(91, 154, 245, 0.4);
 }
 
 ::-webkit-scrollbar { display: none; }

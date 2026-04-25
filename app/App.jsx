@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { History, Compass, Heart, Wallet, User, Coffee } from 'lucide-react'
+import { History, Compass, Heart, Wallet, User } from 'lucide-react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { generateOffer, claimOffer, redeemOffer, dismissOffer, getUserWallet } from './api'
@@ -78,9 +78,38 @@ function LeafletMap({ userLocation, cafeLocation }) {
   return <div ref={containerRef} style={{ position: 'absolute', inset: 0, height: '100%', width: '100%' }} />
 }
 
+// ── Role selection screen ─────────────────────────────────────────────────────
+function RoleSelect({ onSelect }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f5f7fb', justifyContent: 'center', alignItems: 'center', padding: '0 28px' }}>
+      <div style={{ marginBottom: 48, textAlign: 'center' }}>
+        <div style={{ fontSize: 48, marginBottom: 16 }}>💳</div>
+        <h1 style={{ fontSize: 28, fontWeight: 800, color: '#111827', letterSpacing: '-0.5px', marginBottom: 8 }}>City Wallet</h1>
+        <p style={{ fontSize: 15, color: '#6b7280', lineHeight: 1.5 }}>Who are you today?</p>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%' }}>
+        <button onClick={() => onSelect('user')} style={{ width: '100%', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 18, padding: '22px 24px', fontSize: 16, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14, boxShadow: '0 8px 24px rgba(59,130,246,0.2)' }}>
+          <span style={{ fontSize: 28 }}>🧑‍💼</span>
+          <div style={{ textAlign: 'left' }}>
+            <div>I'm a Customer</div>
+            <div style={{ fontSize: 12, fontWeight: 500, opacity: 0.7, marginTop: 2 }}>Find offers near you</div>
+          </div>
+        </button>
+        <button onClick={() => onSelect('merchant')} style={{ width: '100%', background: '#ffffff', color: '#111827', border: '1.5px solid #dbe3ef', borderRadius: 18, padding: '22px 24px', fontSize: 16, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14, boxShadow: '0 4px 16px rgba(15,23,42,0.08)' }}>
+          <span style={{ fontSize: 28 }}>☕</span>
+          <div style={{ textAlign: 'left' }}>
+            <div>I'm a Merchant</div>
+            <div style={{ fontSize: 12, fontWeight: 500, color: '#6b7280', marginTop: 2 }}>Manage your offers & stats</div>
+          </div>
+        </button>
+      </div>
+    </div>
+  )
+}
+
 // ── App (user view) ───────────────────────────────────────────────────────────
 export default function App() {
-  const [view,         setView]         = useState('user')
+  const [view,         setView]         = useState('select')
   const [subTab,       setSubTab]       = useState('explore')
   const [screen,       setScreen]       = useState('offer')
   const [offer,        setOffer]        = useState(null)
@@ -133,21 +162,22 @@ export default function App() {
     setScreen('success')
   }
 
-  if (view === 'merchant') return <MerchantView onBack={() => setView('user')} />
+  if (view === 'select')   return <RoleSelect onSelect={setView} />
+  if (view === 'merchant') return <MerchantView onBack={() => setView('select')} />
 
   const mm = String(Math.floor(qrSecs / 60)).padStart(2, '0')
   const ss = String(qrSecs % 60).padStart(2, '0')
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#faf8fe' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f5f7fb' }}>
 
       {/* Header */}
-      <header style={{ position: 'sticky', top: 0, zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #f4f4f5' }}>
+      <header style={{ position: 'sticky', top: 0, zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderBottom: '1px solid #dbe3ef' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <img src={AVATAR_URL} alt="User" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '1px solid #f4f4f5' }} />
-          <span style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.4px', color: '#030304' }}>Voucher</span>
+          <img src={AVATAR_URL} alt="User" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '1px solid #dbe3ef' }} />
+          <span style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.4px', color: '#111827' }}>Voucher</span>
         </div>
-        <button style={{ padding: 8, borderRadius: '50%', background: 'none', border: 'none', cursor: 'pointer', color: '#030304', display: 'flex' }}>
+        <button style={{ padding: 8, borderRadius: '50%', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', display: 'flex' }}>
           <History size={24} />
         </button>
       </header>
@@ -167,22 +197,22 @@ export default function App() {
                   transition={{ type: 'spring', damping: 25, stiffness: 200 }}
                   style={{ position: 'absolute', bottom: 20, left: '50%', zIndex: 1000, width: '100%', padding: '0 20px' }}
                 >
-                  <div style={{ overflow: 'hidden', borderRadius: 20, border: '1px solid #f4f4f5', background: 'white', boxShadow: '0 20px 50px rgba(0,0,0,0.12)' }}>
-                    <div style={{ height: 6, background: '#f4f4f5' }}>
-                      <motion.div initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: (offer.valid_minutes ?? 30) * 60, ease: 'linear' }} style={{ height: '100%', background: '#0058bc' }} />
+                  <div style={{ overflow: 'hidden', borderRadius: 20, border: '1px solid #dbe3ef', background: '#ffffff', boxShadow: '0 20px 60px rgba(15,23,42,0.16)' }}>
+                    <div style={{ height: 6, background: '#e5e7eb' }}>
+                      <motion.div initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: (offer.valid_minutes ?? 30) * 60, ease: 'linear' }} style={{ height: '100%', background: '#5b9af5' }} />
                     </div>
                     <div style={{ position: 'relative', height: 176 }}>
                       <img src={COFFEE_IMG} alt="Offer" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      <div style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(8px)', borderRadius: 999, padding: '6px 12px', boxShadow: '0 2px 8px rgba(0,0,0,0.1)' }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: '#0058bc' }}>{offer.distance_m}m away</span>
+                      <div style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(8px)', borderRadius: 999, padding: '6px 12px', boxShadow: '0 2px 8px rgba(15,23,42,0.15)' }}>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#5b9af5' }}>{offer.distance_m}m away</span>
                       </div>
                     </div>
                     <div style={{ padding: 24 }}>
-                      <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#46464a', marginBottom: 8 }}>Exclusive Offer Nearby: {offer.merchant}</p>
-                      <h2 style={{ fontSize: 22, fontWeight: 700, lineHeight: 1.3, color: '#030304', letterSpacing: '-0.3px' }}>{offer.discount}</h2>
+                      <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#6b7280', marginBottom: 8 }}>Exclusive Offer Nearby: {offer.merchant}</p>
+                      <h2 style={{ fontSize: 22, fontWeight: 700, lineHeight: 1.3, color: '#111827', letterSpacing: '-0.3px' }}>{offer.discount}</h2>
                       <div style={{ marginTop: 32, display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <button onClick={handleAccept} style={{ flex: 1, background: '#030304', color: 'white', border: 'none', borderRadius: 14, padding: 16, fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>Accept</button>
-                        <button onClick={handleReject} style={{ padding: 16, fontSize: 14, fontWeight: 700, color: '#46464a', background: 'none', border: 'none', cursor: 'pointer' }}>Reject</button>
+                        <button onClick={handleAccept} style={{ flex: 1, background: '#5b9af5', color: 'white', border: 'none', borderRadius: 14, padding: 16, fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 4px 16px rgba(91,154,245,0.3)' }}>Accept</button>
+                        <button onClick={handleReject} style={{ padding: 16, fontSize: 14, fontWeight: 700, color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer' }}>Reject</button>
                       </div>
                     </div>
                   </div>
@@ -196,7 +226,7 @@ export default function App() {
                 <motion.div key="toast"
                   initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }}
                   transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-                  style={{ position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 1000, background: 'white', borderRadius: 16, padding: '14px 24px', boxShadow: '0 8px 24px rgba(0,0,0,0.12)', fontSize: 14, fontWeight: 600, color: '#46464a', whiteSpace: 'nowrap', border: '1px solid #f4f4f5' }}
+                  style={{ position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 1000, background: '#ffffff', borderRadius: 16, padding: '14px 24px', boxShadow: '0 8px 24px rgba(15,23,42,0.12)', fontSize: 14, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap', border: '1px solid #dbe3ef' }}
                 >
                   Got it — we'll find a better moment
                 </motion.div>
@@ -207,28 +237,28 @@ export default function App() {
             <AnimatePresence>
               {screen === 'qr' && (
                 <motion.div key="qr" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 30, stiffness: 250 }}
-                  style={{ position: 'absolute', inset: 0, zIndex: 1500, background: 'white', overflowY: 'auto' }}
+                  style={{ position: 'absolute', inset: 0, zIndex: 1500, background: '#f5f7fb', overflowY: 'auto' }}
                 >
                   <div style={{ padding: '32px 20px 28px', display: 'flex', flexDirection: 'column', gap: 24, minHeight: '100%' }}>
                     <div style={{ textAlign: 'center' }}>
-                      <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#46464a', marginBottom: 6 }}>Show this at the counter</p>
-                      {qrData && <p style={{ fontSize: 18, fontWeight: 700, color: '#030304', letterSpacing: '-0.3px' }}>{qrData.merchant} — {qrData.discount}</p>}
+                      <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#6b7280', marginBottom: 6 }}>Show this at the counter</p>
+                      {qrData && <p style={{ fontSize: 18, fontWeight: 700, color: '#111827', letterSpacing: '-0.3px' }}>{qrData.merchant} — {qrData.discount}</p>}
                     </div>
-                    {/* QR code */}
+                    {/* QR code — keep white bg for scannability */}
                     <div style={{ display: 'flex', justifyContent: 'center' }}>
-                      <div style={{ display: 'inline-block', padding: 12, background: 'white', borderRadius: 12, boxShadow: '0 4px 20px rgba(0,0,0,0.08)', lineHeight: 0 }}>
+                      <div style={{ display: 'inline-block', padding: 16, background: 'white', borderRadius: 16, boxShadow: '0 4px 24px rgba(0,0,0,0.4)', lineHeight: 0 }}>
                         {QR_GRID.map((row, r) => (
                           <div key={r} style={{ display: 'flex' }}>
-                            {row.map((dark, c) => <div key={c} style={{ width: 9, height: 9, background: dark ? '#1B2A4A' : 'white', flexShrink: 0 }} />)}
+                            {row.map((dark, c) => <div key={c} style={{ width: 9, height: 9, background: dark ? '#111113' : 'white', flexShrink: 0 }} />)}
                           </div>
                         ))}
                       </div>
                     </div>
-                    <div style={{ background: '#faf8fe', border: '1px solid #f4f4f5', borderRadius: 16, padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: 14, color: '#46464a', fontWeight: 500 }}>Expires in</span>
-                      <span style={{ fontSize: 28, fontWeight: 800, color: qrSecs < 60 ? '#ba1a1a' : '#030304', fontVariantNumeric: 'tabular-nums', letterSpacing: '2px', transition: 'color 0.3s' }}>{mm}:{ss}</span>
+                    <div style={{ background: '#ffffff', border: '1px solid #dbe3ef', borderRadius: 16, padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: 14, color: '#6b7280', fontWeight: 500 }}>Expires in</span>
+                      <span style={{ fontSize: 28, fontWeight: 800, color: qrSecs < 60 ? '#dc2626' : '#111827', fontVariantNumeric: 'tabular-nums', letterSpacing: '2px', transition: 'color 0.3s' }}>{mm}:{ss}</span>
                     </div>
-                    <button onClick={handleMarkUsed} style={{ width: '100%', background: '#030304', color: 'white', border: 'none', borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 700, cursor: 'pointer', marginTop: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>Mark as Used</button>
+                    <button onClick={handleMarkUsed} style={{ width: '100%', background: '#5b9af5', color: 'white', border: 'none', borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 700, cursor: 'pointer', marginTop: 'auto', boxShadow: '0 4px 16px rgba(91,154,245,0.3)' }}>Mark as Used</button>
                   </div>
                 </motion.div>
               )}
@@ -238,27 +268,27 @@ export default function App() {
             <AnimatePresence>
               {screen === 'success' && (
                 <motion.div key="success" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 30, stiffness: 250 }}
-                  style={{ position: 'absolute', inset: 0, zIndex: 1500, background: 'white', overflowY: 'auto' }}
+                  style={{ position: 'absolute', inset: 0, zIndex: 1500, background: '#f5f7fb', overflowY: 'auto' }}
                 >
                   <div style={{ padding: '48px 24px 32px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, minHeight: '100%' }}>
                     <div style={{ fontSize: 72, lineHeight: 1 }}>✅</div>
                     <div style={{ textAlign: 'center' }}>
-                      <h2 style={{ fontSize: 28, fontWeight: 800, color: '#030304', letterSpacing: '-0.5px', marginBottom: 8 }}>Enjoy your drink!</h2>
-                      <p style={{ fontSize: 15, color: '#46464a', lineHeight: 1.6 }}>The barista has redeemed your offer.</p>
+                      <h2 style={{ fontSize: 28, fontWeight: 800, color: '#111827', letterSpacing: '-0.5px', marginBottom: 8 }}>Enjoy your drink!</h2>
+                      <p style={{ fontSize: 15, color: '#6b7280', lineHeight: 1.6 }}>The barista has redeemed your offer.</p>
                     </div>
                     {redeemResult && (
-                      <div style={{ width: '100%', background: '#faf8fe', border: '1px solid #f4f4f5', borderRadius: 20, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #f4f4f5' }}>
-                          <span style={{ fontSize: 14, color: '#46464a', fontWeight: 500 }}>Cashback earned</span>
-                          <span style={{ fontSize: 16, fontWeight: 800, color: '#0058bc' }}>+€{redeemResult.cashback_earned.toFixed(2)}</span>
+                      <div style={{ width: '100%', background: '#ffffff', border: '1px solid #dbe3ef', borderRadius: 20, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #e5e7eb' }}>
+                          <span style={{ fontSize: 14, color: '#6b7280', fontWeight: 500 }}>Cashback earned</span>
+                          <span style={{ fontSize: 16, fontWeight: 800, color: '#5b9af5' }}>+€{redeemResult.cashback_earned.toFixed(2)}</span>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
-                          <span style={{ fontSize: 14, color: '#46464a', fontWeight: 500 }}>New balance</span>
-                          <span style={{ fontSize: 18, fontWeight: 800, color: '#030304' }}>€{redeemResult.new_balance.toFixed(2)}</span>
+                          <span style={{ fontSize: 14, color: '#6b7280', fontWeight: 500 }}>New balance</span>
+                          <span style={{ fontSize: 18, fontWeight: 800, color: '#111827' }}>€{redeemResult.new_balance.toFixed(2)}</span>
                         </div>
                       </div>
                     )}
-                    <button onClick={() => setScreen('offer')} style={{ width: '100%', background: '#030304', color: 'white', border: 'none', borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 700, cursor: 'pointer', marginTop: 'auto', boxShadow: '0 4px 12px rgba(0,0,0,0.15)' }}>Done</button>
+                    <button onClick={() => setScreen('offer')} style={{ width: '100%', background: '#5b9af5', color: 'white', border: 'none', borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 700, cursor: 'pointer', marginTop: 'auto', boxShadow: '0 4px 16px rgba(91,154,245,0.3)' }}>Done</button>
                   </div>
                 </motion.div>
               )}
@@ -268,35 +298,31 @@ export default function App() {
 
         {subTab === 'wallet' && (
           <div style={{ padding: '32px 20px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <h2 style={{ fontSize: 24, fontWeight: 700, color: '#030304', letterSpacing: '-0.4px' }}>Your Wallet</h2>
-            <div style={{ background: '#0058bc', borderRadius: 20, padding: '28px 24px', color: 'white' }}>
-              <p style={{ fontSize: 11, fontWeight: 700, opacity: 0.65, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 10 }}>Cashback Balance</p>
+            <h2 style={{ fontSize: 24, fontWeight: 700, color: '#111827', letterSpacing: '-0.4px' }}>Your Wallet</h2>
+            <div style={{ background: '#eaf2ff', borderRadius: 20, padding: '28px 24px', color: '#111827', border: '1px solid #cfe0ff' }}>
+              <p style={{ fontSize: 11, fontWeight: 700, opacity: 0.7, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 10 }}>Cashback Balance</p>
               <p style={{ fontSize: 44, fontWeight: 800, letterSpacing: '-1px' }}>{wallet?.balance != null ? `€${wallet.balance.toFixed(2)}` : '—'}</p>
-              <p style={{ fontSize: 13, opacity: 0.6, marginTop: 8 }}>EUR · City Wallet</p>
+              <p style={{ fontSize: 13, opacity: 0.65, marginTop: 8 }}>EUR · City Wallet</p>
             </div>
           </div>
         )}
 
         {(subTab === 'saved' || subTab === 'account') && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#a1a1aa', fontSize: 15, fontWeight: 600 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#9ca3af', fontSize: 15, fontWeight: 600 }}>
             {subTab === 'saved' ? 'Saved offers coming soon' : 'Account coming soon'}
           </div>
         )}
       </main>
 
       {/* Bottom nav */}
-      <nav style={{ borderTop: '1px solid #f4f4f5', background: 'white', paddingTop: 8, paddingBottom: 14, flexShrink: 0, zIndex: 2000, position: 'relative' }}>
+      <nav style={{ borderTop: '1px solid #dbe3ef', background: '#ffffff', paddingTop: 8, paddingBottom: 14, flexShrink: 0, zIndex: 2000, position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: '0 8px' }}>
           {[{ key: 'explore', Icon: Compass, label: 'Explore' }, { key: 'saved', Icon: Heart, label: 'Saved' }, { key: 'wallet', Icon: Wallet, label: 'Wallet' }, { key: 'account', Icon: User, label: 'Account' }].map(({ key, Icon, label }) => (
-            <button key={key} onClick={() => setSubTab(key)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '4px 12px', background: 'none', border: 'none', cursor: 'pointer', color: subTab === key ? '#030304' : '#a1a1aa', transition: 'color 0.15s' }}>
+            <button key={key} onClick={() => setSubTab(key)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '4px 12px', background: 'none', border: 'none', cursor: 'pointer', color: subTab === key ? '#111827' : '#9ca3af', transition: 'color 0.15s' }}>
               <Icon size={24} />
               <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.04em' }}>{label}</span>
             </button>
           ))}
-          <button onClick={() => setView('merchant')} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '4px 12px', background: 'none', border: 'none', cursor: 'pointer', color: '#a1a1aa', transition: 'color 0.15s' }}>
-            <Coffee size={24} />
-            <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.04em' }}>Café</span>
-          </button>
         </div>
       </nav>
     </div>
