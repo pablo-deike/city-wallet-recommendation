@@ -45,7 +45,11 @@ function buildPrompt(rawOffer, localContext) {
     'Make the copy warm, encouraging, and lightly emoji-forward without feeling noisy.',
     'Use 1-2 natural emojis total across the fields.',
     'The support_note is a short compliment or encouragement for the user, not an extra perk.',
-    'Do not invent facts, freebies, merchant details, or add markdown.',
+    'Personalize tone using two device-only signals: the user\'s stated preferences (preferenceEntries / userIntent) and their past redemptions (recentRedemptions, repeatMerchants).',
+    'When the raw offer\'s merchant appears in repeatMerchants or recentRedemptions, lean into a familiar, returning-regular warmth.',
+    'When the raw offer is a new merchant for them, lean into a fresh-discovery tone.',
+    'Reflect the userIntent or matching preferenceEntries in word choice when they fit the raw offer (e.g. "quiet" intent → calmer phrasing).',
+    'Never invent facts, freebies, merchant details, or markdown. Keep merchant, discount, and distance exactly as in the raw offer.',
     `Raw offer: ${JSON.stringify(rawOffer ?? {})}`,
     `Device context: ${JSON.stringify(localContext ?? {})}`,
   ].join('\n')

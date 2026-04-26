@@ -77,6 +77,7 @@ export default function PreferenceSheet({
   }
   const photoFactory = photoFactoryRef.current
   const photoSupported = Boolean(photoFactory?.supported)
+  const photoAnalyzes = Boolean(photoFactory?.analyzes)
 
   useEffect(() => {
     if (!open) {
@@ -166,7 +167,7 @@ export default function PreferenceSheet({
 
   function handlePickPhoto() {
     if (!photoSupported) {
-      setStatusMessage('Photo analysis is not available on this device.')
+      setStatusMessage('Photo capture is not available on this device.')
       return
     }
 
@@ -182,7 +183,7 @@ export default function PreferenceSheet({
     }
 
     setPhotoBusy(true)
-    setStatusMessage('Analyzing photo on-device…')
+    setStatusMessage(photoAnalyzes ? 'Analyzing photo on-device…' : 'Saving photo from your device…')
 
     try {
       const session = photoFactory.createSession()
@@ -193,13 +194,13 @@ export default function PreferenceSheet({
         if (summary) {
           commitEntry('image', summary)
         } else {
-          setStatusMessage('Could not summarize that photo.')
+          setStatusMessage(photoAnalyzes ? 'Could not summarize that photo.' : 'Could not save that photo.')
         }
       } finally {
         session.dispose?.()
       }
     } catch {
-      setStatusMessage('Photo analysis failed.')
+      setStatusMessage(photoAnalyzes ? 'Photo analysis failed.' : 'Photo capture failed.')
     }
 
     setPhotoBusy(false)
@@ -434,12 +435,13 @@ export default function PreferenceSheet({
                 }}
               >
                 <Camera size={16} />
-                {photoBusy ? 'Analyzing…' : photoSupported ? 'Use photo' : 'Photo unavailable'}
+                {photoBusy ? 'Saving…' : photoSupported ? 'Add photo' : 'Photo unavailable'}
               </button>
               <input
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
+                capture="environment"
                 onChange={handlePhotoChange}
                 style={{ display: 'none' }}
               />
