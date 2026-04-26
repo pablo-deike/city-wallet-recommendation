@@ -1,4 +1,5 @@
 import { C } from '../../constants'
+import { WALLET_INTENT_MAX } from '../../lib/walletPreferences'
 
 const chipStyle = {
   display: 'inline-flex',
@@ -15,12 +16,163 @@ const chipStyle = {
   whiteSpace: 'nowrap',
 }
 
-export default function ContextBar() {
+const srOnlyStyle = {
+  position: 'absolute',
+  width: 1,
+  height: 1,
+  padding: 0,
+  margin: -1,
+  overflow: 'hidden',
+  clip: 'rect(0, 0, 0, 0)',
+  whiteSpace: 'nowrap',
+  border: 0,
+}
+
+function getStatusPresentation(status, fallbackReason) {
+  if (status === 'off') {
+    return {
+      label: 'Off',
+      background: 'rgba(107, 114, 128, 0.12)',
+      borderColor: 'rgba(107, 114, 128, 0.2)',
+      color: C.gray,
+      title: 'Local personalization is disabled.',
+    }
+  }
+
+  if (status === 'fallback') {
+    const detail = fallbackReason ? fallbackReason.replace(/-/g, ' ') : null
+
+    return {
+      label: detail ? `Local fallback · ${detail}` : 'Local fallback',
+      background: 'rgba(245, 166, 35, 0.14)',
+      borderColor: 'rgba(245, 166, 35, 0.34)',
+      color: C.navy,
+      title: detail
+        ? `On-device personalization fell back because ${detail}.`
+        : 'On-device personalization fell back to deterministic copy.',
+    }
+  }
+
+  return {
+    label: 'AI',
+    background: 'rgba(245, 166, 35, 0.18)',
+    borderColor: 'rgba(245, 166, 35, 0.38)',
+    color: C.navy,
+    title: 'On-device personalization is active.',
+  }
+}
+
+export default function ContextBar({
+  mode = 'ai',
+  onModeChange = () => {},
+  typedIntent = '',
+  onTypedIntentChange = () => {},
+  status = 'ai',
+  fallbackReason = null,
+  onReset = () => {},
+}) {
+  const isDirty = mode !== 'ai' || typedIntent.length > 0
+  const nextMode = mode === 'ai' ? 'off' : 'ai'
+  const statusPresentation = getStatusPresentation(status, fallbackReason)
+
   return (
-    <div style={{ padding: '10px 16px', display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-      <span style={chipStyle}>🌧️ 11°C · Overcast</span>
-      <span style={chipStyle}>📍 Stuttgart Altstadt</span>
-      <span style={chipStyle}>🕐 12:43 · Tuesday</span>
+    <div style={{ padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        <span style={chipStyle}>🌧️ 11°C · Overcast</span>
+        <span style={chipStyle}>📍 Stuttgart Altstadt</span>
+        <span style={chipStyle}>🕐 12:43 · Tuesday</span>
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button
+          type="button"
+          aria-label="Toggle personalization mode"
+          onClick={() => onModeChange(nextMode)}
+          style={{
+            border: 'none',
+            borderRadius: 14,
+            padding: '8px 12px',
+            background: mode === 'ai' ? C.navy : 'rgba(107, 114, 128, 0.14)',
+            color: mode === 'ai' ? 'white' : C.gray,
+            fontSize: 12,
+            fontWeight: 800,
+            cursor: 'pointer',
+            boxShadow: mode === 'ai'
+              ? '0 4px 12px rgba(27,42,74,0.18)'
+              : 'inset 0 0 0 1px rgba(107,114,128,0.18)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {mode === 'ai' ? 'AI mode' : 'Off mode'}
+        </button>
+
+        <div style={{ position: 'relative', flex: '1 1 180px', minWidth: 0 }}>
+          <label htmlFor="wallet-typed-intent" style={srOnlyStyle}>
+            What are you up to?
+          </label>
+          <input
+            id="wallet-typed-intent"
+            type="text"
+            value={typedIntent}
+            onChange={(event) => onTypedIntentChange(event.target.value)}
+            placeholder="What are you up to?"
+            maxLength={WALLET_INTENT_MAX}
+            style={{
+              width: '100%',
+              minWidth: 0,
+              borderRadius: 14,
+              border: '1px solid rgba(27,42,74,0.12)',
+              background: 'white',
+              color: C.navy,
+              padding: '9px 12px',
+              fontSize: 12,
+              outline: 'none',
+              boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        <span
+          role="status"
+          aria-live="polite"
+          title={statusPresentation.title}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            borderRadius: 999,
+            padding: '7px 10px',
+            border: `1px solid ${statusPresentation.borderColor}`,
+            background: statusPresentation.background,
+            color: statusPresentation.color,
+            fontSize: 11,
+            fontWeight: 800,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {statusPresentation.label}
+        </span>
+
+        {isDirty ? (
+          <button
+            type="button"
+            aria-label="Reset personalization controls"
+            onClick={onReset}
+            style={{
+              border: 'none',
+              borderRadius: 12,
+              padding: '7px 9px',
+              background: 'transparent',
+              color: C.gray,
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            Reset
+          </button>
+        ) : null}
+      </div>
     </div>
   )
 }
