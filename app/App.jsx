@@ -1,10 +1,12 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
 import { Compass, Clock } from 'lucide-react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { QRCodeSVG } from 'qrcode.react'
 import { generateOffer, claimOffer, redeemOffer, dismissOffer } from './api'
+import { loadGemma4WebHumanizer } from './lib/localPersonalization'
+import { resolveDisplayOffer } from './lib/localPersonalization/resolveDisplayOffer'
 import MerchantView from './MerchantView'
 import vicoLogo from './images/vico-logo.svg'
 
@@ -15,7 +17,6 @@ const MERCHANT_COORDS = {
 const DEFAULT_LOC = { lat: 52.5185, lon: 13.4010 }
 const BASE_PRICE = 4.90
 
-
 // ── Small tappable map thumbnail ─────────────────────────────────────────────
 function MapThumb({ mapsUrl, mapsImageUrl, size = 56, radius = 10 }) {
   return (
@@ -24,6 +25,32 @@ function MapThumb({ mapsUrl, mapsImageUrl, size = 56, radius = 10 }) {
       <img src={mapsImageUrl} alt="map" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
     </a>
   )
+}
+
+function getBrowserLocale() {
+  try {
+    return navigator.language || 'en-US'
+  } catch {
+    return 'en-US'
+  }
+}
+
+function buildLocalContext(userLocation, history) {
+  return {
+    locale: getBrowserLocale(),
+    weather: 'overcast',
+    temperature: 11,
+    localTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    userLocation: userLocation
+      ? { lat: userLocation.lat, lon: userLocation.lon }
+      : null,
+    acceptedOfferCount: history.length,
+    recentAcceptedMerchants: history.slice(0, 3).map(item => item.merchant),
+  }
+}
+
+function getActiveOfferId(displayOffer, rawOffer) {
+  return displayOffer?.offer_id ?? rawOffer?.offer_id ?? null
 }
 
 // ── Vanilla Leaflet map ───────────────────────────────────────────────────────
@@ -102,14 +129,21 @@ export default function App() {
   const [view, setView] = useState('select')
   const [subTab, setSubTab] = useState('explore')
   const [screen, setScreen] = useState('offer')
+  const [rawOffer, setRawOffer] = useState(null)
   const [offer, setOffer] = useState(null)
   const [qrData, setQrData] = useState(null)
   const [userLocation, setUserLocation] = useState(null)
   const [paying, setPaying] = useState(false)
   const [history, setHistory] = useState([])
   const [expandedQr, setExpandedQr] = useState(null)
+  const [localRuntime, setLocalRuntime] = useState(null)
+  const [localRuntimeReady, setLocalRuntimeReady] = useState(false)
 
   const cafeLocation = offer?.merchant_id ? MERCHANT_COORDS[offer.merchant_id] ?? null : null
+  const localContext = useMemo(
+    () => buildLocalContext(userLocation, history),
+    [userLocation, history],
+  )
 
   // Parse discount % from strings like "15% off any hot drink"
   const discountPct = offer ? (parseInt(offer.discount) || 0) : 0
@@ -117,14 +151,73 @@ export default function App() {
   const youPay = parseFloat((BASE_PRICE - savings).toFixed(2))
 
   useEffect(() => {
-    const fetchOffer = (lat, lon) => generateOffer(lat, lon).then(setOffer).catch(() => { })
+    if (view !== 'user') return
+
+    const fetchOffer = (lat, lon) => generateOffer(lat, lon).then(setRawOffer).catch(() => {})
     if (!navigator.geolocation) { setUserLocation(DEFAULT_LOC); fetchOffer(DEFAULT_LOC.lat, DEFAULT_LOC.lon); return }
     navigator.geolocation.getCurrentPosition(
       pos => { const loc = { lat: pos.coords.latitude, lon: pos.coords.longitude }; setUserLocation(loc); fetchOffer(loc.lat, loc.lon) },
       () => { setUserLocation(DEFAULT_LOC); fetchOffer(DEFAULT_LOC.lat, DEFAULT_LOC.lon) },
       { timeout: 8000, maximumAge: 60000 }
     )
-  }, [])
+  }, [view])
+
+  useEffect(() => {
+    if (view !== 'user') return
+
+    let cancelled = false
+    let shell = null
+
+    setLocalRuntimeReady(false)
+    loadGemma4WebHumanizer()
+      .then(loadedShell => {
+        shell = loadedShell
+
+        if (cancelled) {
+          loadedShell?.dispose?.()
+          return
+        }
+
+        setLocalRuntime(loadedShell)
+        setLocalRuntimeReady(true)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLocalRuntime(null)
+          setLocalRuntimeReady(true)
+        }
+      })
+
+    return () => {
+      cancelled = true
+      shell?.dispose?.()
+    }
+  }, [view])
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (!rawOffer) {
+      setOffer(null)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    resolveDisplayOffer(
+      rawOffer,
+      localContext,
+      localRuntimeReady ? localRuntime : null,
+    ).then(displayOffer => {
+      if (!cancelled) {
+        setOffer(displayOffer)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [rawOffer, localContext, localRuntime, localRuntimeReady])
 
   useEffect(() => {
     if (screen !== 'dismissed') return
@@ -140,17 +233,23 @@ export default function App() {
   }, [screen, offer])
 
   async function handleAccept() {
-    try { const data = await claimOffer(offer.offer_id); setQrData(data) } catch { }
+    const offerId = getActiveOfferId(offer, rawOffer)
+    if (!offerId) return
+
+    try { const data = await claimOffer(offerId); setQrData(data) } catch {}
     setScreen('payment')
   }
 
   async function handlePay() {
+    const offerId = getActiveOfferId(offer, rawOffer)
+    if (!offerId) return
+
     setPaying(true)
     try {
-      const token = qrData?.qr_token ?? `QR-FALLBACK-${offer.offer_id}`
-      await redeemOffer(offer.offer_id, token, BASE_PRICE)
+      const token = qrData?.qr_token ?? `QR-FALLBACK-${offerId}`
+      await redeemOffer(offerId, token, BASE_PRICE)
       setHistory(prev => [{
-        id: offer.offer_id,
+        id: offerId,
         merchant: offer.merchant,
         discount: offer.discount,
         mapsUrl: offer.maps_url,
@@ -164,7 +263,13 @@ export default function App() {
     setScreen('qr')
   }
 
-  async function handleReject() { dismissOffer(offer.offer_id).catch(() => { }); setScreen('dismissed') }
+  async function handleReject() {
+    const offerId = getActiveOfferId(offer, rawOffer)
+    if (!offerId) return
+
+    dismissOffer(offerId).catch(() => {})
+    setScreen('dismissed')
+  }
 
   if (view === 'select') return <RoleSelect onSelect={setView} />
   if (view === 'merchant') return <MerchantView onBack={() => setView('select')} />
@@ -204,9 +309,13 @@ export default function App() {
                             <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b7280', margin: 0 }}>{offer.merchant}</p>
                             <span style={{ background: '#eef4ff', borderRadius: 999, padding: '2px 8px', fontSize: 11, fontWeight: 700, color: '#5b9af5', flexShrink: 0 }}>{offer.distance_m}m</span>
                           </div>
-                          <h2 style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.3, color: '#111827', letterSpacing: '-0.2px', margin: 0 }}>{offer.discount}</h2>
+                          <h2 style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.3, color: '#111827', letterSpacing: '-0.2px', margin: 0 }}>{offer.headline || offer.discount}</h2>
+                          <div style={{ display: 'inline-flex', marginTop: 7, background: '#eef4ff', borderRadius: 999, padding: '3px 9px', fontSize: 11, fontWeight: 700, color: '#5b9af5' }}>{offer.discount}</div>
                         </div>
                       </div>
+                      {offer.reason && (
+                        <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.4, color: '#6b7280' }}>{offer.reason}</p>
+                      )}
                       <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
                         <button onClick={handleAccept} style={{ flex: 1, background: '#5b9af5', color: 'white', border: 'none', borderRadius: 12, padding: '13px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 4px 16px rgba(91,154,245,0.3)' }}>Accept</button>
                         <button onClick={handleReject} style={{ padding: '13px 18px', fontSize: 14, fontWeight: 700, color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer' }}>Reject</button>
