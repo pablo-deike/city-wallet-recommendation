@@ -11,7 +11,7 @@ const mountedTrees = []
 
 function click(element) {
   act(() => {
-    element.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    element.click()
   })
 }
 
@@ -37,6 +37,9 @@ function mountContextBar(overrideProps = {}) {
     status: 'ai',
     fallbackReason: null,
     onReset: () => {},
+    voiceState: 'supported-idle',
+    onToggleListening: () => {},
+    restrictedCategory: null,
     ...overrideProps,
   }
 
@@ -55,6 +58,10 @@ function mountContextBar(overrideProps = {}) {
     container,
     rerender: render,
   }
+}
+
+function queryVoiceButton(container, label) {
+  return container.querySelector(`button[aria-label="${label}"]`)
 }
 
 afterEach(() => {
@@ -123,6 +130,50 @@ describe('ContextBar', () => {
 
     rerender({ status: 'off', fallbackReason: null })
     expect(container.querySelector('[role="status"]').textContent).toBe('Off')
+  })
+
+  it('renders voice controls with supported, listening, and unsupported labels', () => {
+    const { container, rerender } = mountContextBar({ voiceState: 'supported-idle' })
+
+    const idleButton = queryVoiceButton(container, 'Toggle voice intent')
+    expect(idleButton).not.toBeNull()
+    expect(idleButton.disabled).toBe(false)
+
+    rerender({ voiceState: 'listening' })
+
+    const listeningButton = queryVoiceButton(container, 'Stop voice intent')
+    expect(listeningButton).not.toBeNull()
+    expect(listeningButton.getAttribute('aria-pressed')).toBe('true')
+
+    rerender({ voiceState: 'unsupported' })
+
+    const unsupportedButton = queryVoiceButton(container, 'Voice intent unsupported')
+    expect(unsupportedButton).not.toBeNull()
+    expect(unsupportedButton.disabled).toBe(true)
+    expect(unsupportedButton.getAttribute('aria-disabled')).toBe('true')
+  })
+
+  it('calls onToggleListening when the mic button is clicked', () => {
+    const onToggleListening = vi.fn()
+    const { container } = mountContextBar({ onToggleListening, voiceState: 'supported-idle' })
+
+    click(queryVoiceButton(container, 'Toggle voice intent'))
+
+    expect(onToggleListening).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders the guardrail note only for restricted alcohol intents', () => {
+    const { container, rerender } = mountContextBar({
+      restrictedCategory: { category: 'alcohol', matchedTerm: 'spritz' },
+    })
+
+    const guardrail = container.querySelector('[data-testid="intent-guardrail"]')
+    expect(guardrail).not.toBeNull()
+    expect(guardrail.textContent).toBe("Demo: please drink responsibly. We don't verify age.")
+
+    rerender({ restrictedCategory: null })
+
+    expect(container.querySelector('[data-testid="intent-guardrail"]')).toBeNull()
   })
 
   it('shows and triggers reset only when state differs from defaults', () => {

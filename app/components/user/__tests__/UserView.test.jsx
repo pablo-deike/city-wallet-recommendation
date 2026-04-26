@@ -9,7 +9,10 @@ vi.mock('../../../lib/localPersonalization/index', () => ({
 }))
 
 import UserView from '../UserView'
-import { clearWalletPreferences } from '../../../lib/walletPreferences'
+import {
+  WALLET_INTENT_MAX,
+  clearWalletPreferences,
+} from '../../../lib/walletPreferences'
 import { humanizeOfferOnDevice } from '../../../lib/localPersonalization/index'
 
 const humanizeOfferOnDeviceMock = vi.mocked(humanizeOfferOnDevice)
@@ -54,20 +57,65 @@ function createFetchStub() {
   })
 }
 
+function createFakeSpeechSession() {
+  let handleResult = () => {}
+  let handleError = () => {}
+  let handleEnd = () => {}
+
+  return {
+    start: vi.fn(),
+    stop: vi.fn(),
+    dispose: vi.fn(() => {
+      handleResult = () => {}
+      handleError = () => {}
+      handleEnd = () => {}
+    }),
+    onResult(callback) {
+      handleResult = typeof callback === 'function' ? callback : () => {}
+    },
+    onError(callback) {
+      handleError = typeof callback === 'function' ? callback : () => {}
+    },
+    onEnd(callback) {
+      handleEnd = typeof callback === 'function' ? callback : () => {}
+    },
+    emitResult(value) {
+      handleResult(value)
+    },
+    emitError(value = { error: 'network' }) {
+      handleError(value)
+    },
+    emitEnd(value) {
+      handleEnd(value)
+    },
+  }
+}
+
+function createSpeechRecognitionFactory({ supported = true, createSession } = {}) {
+  if (!supported) {
+    return vi.fn(() => ({ supported: false }))
+  }
+
+  return vi.fn(() => ({
+    supported: true,
+    createSession,
+  }))
+}
+
 async function flushEffects() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 0))
   })
 }
 
-async function mountUserView() {
+async function mountUserView(overrideProps = {}) {
   const container = document.createElement('div')
   document.body.appendChild(container)
 
   const root = createRoot(container)
 
   await act(async () => {
-    root.render(<UserView />)
+    root.render(<UserView {...overrideProps} />)
   })
 
   mountedTrees.push({ container, root })
@@ -86,7 +134,7 @@ async function mountUserView() {
 
 async function click(element) {
   await act(async () => {
-    element.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    element.click()
   })
 }
 
@@ -113,6 +161,19 @@ function getStatus(container) {
 
 function getButtonByText(container, text) {
   return Array.from(container.querySelectorAll('button')).find((button) => button.textContent === text)
+}
+
+function getVoiceButton(container, label) {
+  return container.querySelector(`button[aria-label="${label}"]`)
+}
+
+function readPersistedIntent() {
+  const storedIntent = localStorage.getItem('cw.wallet.intent')
+  return storedIntent == null ? null : JSON.parse(storedIntent)
+}
+
+function getGuardrail(container) {
+  return container.querySelector('[data-testid="intent-guardrail"]')
 }
 
 beforeEach(() => {
@@ -184,6 +245,7 @@ describe('UserView', () => {
     const fetchSpy = globalThis.fetch
 
     await typeInto(getIntentInput(container), 'Quiet patio coffee')
+    await flushEffects()
 
     expect(humanizeOfferOnDeviceMock).toHaveBeenLastCalledWith(rawOffer, {
       typedIntent: 'Quiet patio coffee',
@@ -198,6 +260,154 @@ describe('UserView', () => {
 
     expect(requestBody).not.toHaveProperty('typedIntent')
     expect(JSON.stringify(requestBody)).not.toContain('Quiet patio coffee')
+  })
+
+  it('commits dictated transcripts through the existing typed-intent path and returns to idle on end', async () => {
+    const fakeSession = createFakeSpeechSession()
+    const speechRecognitionFactory = createSpeechRecognitionFactory({
+      createSession: () => fakeSession,
+    })
+    const { container } = await mountUserView({ speechRecognitionFactory })
+
+    await click(getVoiceButton(container, 'Toggle voice intent'))
+
+    expect(fakeSession.start).toHaveBeenCalledTimes(1)
+    expect(getVoiceButton(container, 'Stop voice intent')).toBeTruthy()
+
+    await act(async () => {
+      fakeSession.emitResult('Quiet patio coffee')
+    })
+    await flushEffects()
+
+    expect(readPersistedIntent()).toBe('Quiet patio coffee')
+    expect(humanizeOfferOnDeviceMock).toHaveBeenLastCalledWith(rawOffer, {
+      typedIntent: 'Quiet patio coffee',
+    })
+    expect(container.textContent).toContain('Personalized for Quiet patio coffee')
+
+    await act(async () => {
+      fakeSession.emitEnd()
+    })
+
+    expect(getVoiceButton(container, 'Toggle voice intent')).toBeTruthy()
+    expect(fakeSession.dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops the active session when the mic is clicked again while listening', async () => {
+    const fakeSession = createFakeSpeechSession()
+    const speechRecognitionFactory = createSpeechRecognitionFactory({
+      createSession: () => fakeSession,
+    })
+    const { container } = await mountUserView({ speechRecognitionFactory })
+
+    await click(getVoiceButton(container, 'Toggle voice intent'))
+    expect(getVoiceButton(container, 'Stop voice intent')).toBeTruthy()
+
+    await click(getVoiceButton(container, 'Stop voice intent'))
+
+    expect(fakeSession.stop).toHaveBeenCalledTimes(1)
+    expect(fakeSession.dispose).toHaveBeenCalledTimes(1)
+    expect(getVoiceButton(container, 'Toggle voice intent')).toBeTruthy()
+    expect(readPersistedIntent()).toBeNull()
+  })
+
+  it('renders the mic as unsupported and leaves persisted intent unchanged when speech is unavailable', async () => {
+    const speechRecognitionFactory = createSpeechRecognitionFactory({ supported: false })
+    const { container } = await mountUserView({ speechRecognitionFactory })
+
+    const unsupportedButton = getVoiceButton(container, 'Voice intent unsupported')
+    expect(unsupportedButton).toBeTruthy()
+    expect(unsupportedButton.disabled).toBe(true)
+
+    await click(unsupportedButton)
+    await flushEffects()
+
+    expect(readPersistedIntent()).toBeNull()
+  })
+
+  it('renders the alcohol guardrail only for restricted typed intents', async () => {
+    const { container } = await mountUserView()
+
+    await typeInto(getIntentInput(container), 'After-work spritz')
+    await flushEffects()
+
+    expect(getGuardrail(container)?.textContent).toBe("Demo: please drink responsibly. We don't verify age.")
+
+    await typeInto(getIntentInput(container), 'Quiet patio coffee')
+    await flushEffects()
+
+    expect(getGuardrail(container)).toBeNull()
+  })
+
+  it('ignores supported factories that do not provide createSession', async () => {
+    const speechRecognitionFactory = createSpeechRecognitionFactory()
+    const { container } = await mountUserView({ speechRecognitionFactory })
+
+    await click(getVoiceButton(container, 'Toggle voice intent'))
+    await flushEffects()
+
+    expect(getVoiceButton(container, 'Toggle voice intent')).toBeTruthy()
+    expect(readPersistedIntent()).toBeNull()
+  })
+
+  it('ignores malformed non-string dictated transcripts', async () => {
+    const fakeSession = createFakeSpeechSession()
+    const speechRecognitionFactory = createSpeechRecognitionFactory({
+      createSession: () => fakeSession,
+    })
+    const { container } = await mountUserView({ speechRecognitionFactory })
+
+    await click(getVoiceButton(container, 'Toggle voice intent'))
+
+    await act(async () => {
+      fakeSession.emitResult(12345)
+    })
+    await flushEffects()
+
+    expect(readPersistedIntent()).toBeNull()
+    expect(getIntentInput(container).value).toBe('')
+    expect(container.textContent).not.toContain('Personalized for 12345')
+  })
+
+  it('returns to supported-idle on speech errors without overwriting the prior intent', async () => {
+    const fakeSession = createFakeSpeechSession()
+    const speechRecognitionFactory = createSpeechRecognitionFactory({
+      createSession: () => fakeSession,
+    })
+    const { container } = await mountUserView({ speechRecognitionFactory })
+
+    await typeInto(getIntentInput(container), 'Quiet patio coffee')
+    await flushEffects()
+
+    await click(getVoiceButton(container, 'Toggle voice intent'))
+    expect(getVoiceButton(container, 'Stop voice intent')).toBeTruthy()
+
+    await act(async () => {
+      fakeSession.emitError({ error: 'network' })
+    })
+
+    expect(getVoiceButton(container, 'Toggle voice intent')).toBeTruthy()
+    expect(readPersistedIntent()).toBe('Quiet patio coffee')
+    expect(fakeSession.dispose).toHaveBeenCalledTimes(1)
+  })
+
+  it('clamps dictated transcripts to WALLET_INTENT_MAX before persisting them', async () => {
+    const fakeSession = createFakeSpeechSession()
+    const speechRecognitionFactory = createSpeechRecognitionFactory({
+      createSession: () => fakeSession,
+    })
+    const { container } = await mountUserView({ speechRecognitionFactory })
+    const oversizedTranscript = 'a'.repeat(WALLET_INTENT_MAX + 50)
+
+    await click(getVoiceButton(container, 'Toggle voice intent'))
+
+    await act(async () => {
+      fakeSession.emitResult(oversizedTranscript)
+    })
+    await flushEffects()
+
+    expect(readPersistedIntent()).toHaveLength(WALLET_INTENT_MAX)
+    expect(getIntentInput(container).value).toHaveLength(WALLET_INTENT_MAX)
   })
 
   it('claims the raw backend offer id even when ai rewrites the displayed copy', async () => {

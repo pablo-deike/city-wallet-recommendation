@@ -20,6 +20,7 @@ const BASE_URL = 'http://localhost:8000'
 const ALLOWED_URL_PATTERN = /^http:\/\/localhost:8000\//
 const FORBIDDEN_BODY_FRAGMENTS = [
   'Quiet patio coffee',
+  'After-work spritz',
   'typedIntent',
   'localContext',
   'local_personalization',
@@ -141,14 +142,14 @@ async function flushEffects() {
   })
 }
 
-async function mountUserView() {
+async function mountUserView(overrideProps = {}) {
   const container = document.createElement('div')
   document.body.appendChild(container)
 
   const root = createRoot(container)
 
   await act(async () => {
-    root.render(<UserView />)
+    root.render(<UserView {...overrideProps} />)
   })
 
   mountedTrees.push({ container, root })
@@ -182,6 +183,67 @@ async function typeInto(input, value) {
     valueSetter.call(input, value)
     input.dispatchEvent(new Event('input', { bubbles: true }))
   })
+}
+
+function createFakeSpeechSession() {
+  let handleResult = () => {}
+  let handleError = () => {}
+  let handleEnd = () => {}
+
+  return {
+    start: vi.fn(),
+    stop: vi.fn(),
+    dispose: vi.fn(() => {
+      handleResult = () => {}
+      handleError = () => {}
+      handleEnd = () => {}
+    }),
+    onResult(callback) {
+      handleResult = typeof callback === 'function' ? callback : () => {}
+    },
+    onError(callback) {
+      handleError = typeof callback === 'function' ? callback : () => {}
+    },
+    onEnd(callback) {
+      handleEnd = typeof callback === 'function' ? callback : () => {}
+    },
+    emitResult(value) {
+      handleResult(value)
+    },
+    emitError(value = { error: 'network' }) {
+      handleError(value)
+    },
+    emitEnd(value) {
+      handleEnd(value)
+    },
+  }
+}
+
+function createSpeechRecognitionFactory({ supported = true, sessions = [] } = {}) {
+  if (!supported) {
+    return vi.fn(() => ({ supported: false }))
+  }
+
+  return vi.fn(() => ({
+    supported: true,
+    createSession: () => {
+      const nextSession = sessions.shift()
+
+      if (!nextSession) {
+        throw new Error('Expected a fake speech session for this test step')
+      }
+
+      return nextSession
+    },
+  }))
+}
+
+function getVoiceButton(container, label) {
+  return container.querySelector(`button[aria-label="${label}"]`)
+}
+
+function getGuardrail(container) {
+  return container.querySelector('[data-testid="intent-guardrail"]')
 }
 
 function getIntentInput(container) {
@@ -286,6 +348,86 @@ describe('UserView lifecycle privacy boundary', () => {
 
     expect(container.textContent).toContain('Personalized for Quiet patio coffee')
     expect(getButtonByText(container, 'Claim Offer')).toBeTruthy()
+  })
+
+  it('keeps dictated transcripts and restricted-category handling off the wire across dismiss, claim, and redeem flows', async () => {
+    const dictationSession = createFakeSpeechSession()
+    const errorSession = createFakeSpeechSession()
+    const speechRecognitionFactory = createSpeechRecognitionFactory({
+      sessions: [dictationSession, errorSession],
+    })
+    const { container } = await mountUserView({ speechRecognitionFactory })
+
+    expect(capturedRequests.map(({ path }) => path)).toEqual(['/offers/generate'])
+    expect(capturedRequests[0].url).toBe(`${BASE_URL}/offers/generate`)
+
+    await click(getVoiceButton(container, 'Toggle voice intent'))
+
+    expect(dictationSession.start).toHaveBeenCalledTimes(1)
+    expect(getVoiceButton(container, 'Stop voice intent')).toBeTruthy()
+
+    await act(async () => {
+      dictationSession.emitResult('After-work spritz')
+    })
+    await flushEffects()
+
+    expect(humanizeOfferOnDeviceMock).toHaveBeenLastCalledWith(rawOffer, {
+      typedIntent: 'After-work spritz',
+    })
+    expect(getIntentInput(container)?.value).toBe('After-work spritz')
+    expect(getGuardrail(container)?.textContent).toContain("Demo: please drink responsibly. We don't verify age.")
+    expect(container.textContent).toContain('Personalized for After-work spritz')
+
+    vi.useFakeTimers()
+
+    await click(getButtonByText(container, 'Not now'))
+
+    expect(container.textContent).toContain("Got it — we'll find a better moment")
+    assertExactPaths(capturedRequests, [
+      '/offers/generate',
+      `/offers/${rawOffer.offer_id}/dismiss`,
+    ])
+    assertAllowedHosts(capturedRequests)
+    assertBodiesStayClean(capturedRequests)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+
+    expect(container.textContent).toContain('Personalized for After-work spritz')
+    expect(getButtonByText(container, 'Claim Offer')).toBeTruthy()
+
+    vi.useRealTimers()
+
+    await click(getVoiceButton(container, 'Toggle voice intent'))
+
+    expect(errorSession.start).toHaveBeenCalledTimes(1)
+    expect(getVoiceButton(container, 'Stop voice intent')).toBeTruthy()
+
+    await act(async () => {
+      errorSession.emitError({ error: 'network' })
+    })
+
+    expect(getVoiceButton(container, 'Toggle voice intent')).toBeTruthy()
+    expect(getIntentInput(container)?.value).toBe('After-work spritz')
+
+    await click(getButtonByText(container, 'Claim Offer'))
+    await flushEffects()
+    await click(getButtonByText(container, 'Mark as Used'))
+    await flushEffects()
+
+    assertExactPaths(capturedRequests, [
+      '/offers/generate',
+      `/offers/${rawOffer.offer_id}/dismiss`,
+      `/offers/${rawOffer.offer_id}/claim`,
+      `/offers/${rawOffer.offer_id}/redeem`,
+    ])
+    assertAllowedHosts(capturedRequests)
+    assertBodiesStayClean(capturedRequests)
+
+    expect(capturedRequests.every(({ url }) => url.startsWith(BASE_URL))).toBe(true)
+    expect(capturedRequests.some(({ body }) => body.includes('restrictedCategory'))).toBe(false)
+    expect(capturedRequests.some(({ body }) => body.includes('matchedTerm'))).toBe(false)
   })
 
   it('pins every captured lifecycle URL to the localhost host allow-list', async () => {

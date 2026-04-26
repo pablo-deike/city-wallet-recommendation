@@ -1,7 +1,13 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { C } from '../../constants'
 import { generateOffer, claimOffer, redeemOffer, dismissOffer } from '../../api'
 import { humanizeOfferOnDevice } from '../../lib/localPersonalization/index'
+import { classifyIntent } from '../../lib/localPersonalization/restrictedCategory'
+import {
+  createSpeechRecognitionSession,
+  detectSpeechRecognitionSupport,
+  normalizeTranscript,
+} from '../../lib/voice/speechRecognition'
 import {
   DEFAULT_WALLET_PREFERENCES,
   loadWalletPreferences,
@@ -32,15 +38,55 @@ function buildOffDisplayOffer(rawOffer) {
   }
 }
 
-export default function UserView() {
+function defaultSpeechRecognitionFactory(globalLike = globalThis) {
+  if (!detectSpeechRecognitionSupport(globalLike)) {
+    return { supported: false }
+  }
+
+  const SpeechRecognition = globalLike?.SpeechRecognition ?? globalLike?.webkitSpeechRecognition
+
+  if (typeof SpeechRecognition !== 'function') {
+    return { supported: false }
+  }
+
+  return {
+    supported: true,
+    createSession() {
+      return createSpeechRecognitionSession({ SpeechRecognition })
+    },
+  }
+}
+
+function resolveSpeechRecognitionFactory(speechRecognitionFactory) {
+  try {
+    return speechRecognitionFactory?.() ?? { supported: false }
+  } catch {
+    return { supported: false }
+  }
+}
+
+export default function UserView({ speechRecognitionFactory = defaultSpeechRecognitionFactory }) {
   const [screen, setScreen] = useState('offer') // 'offer' | 'qr' | 'success' | 'dismissed'
   const [rawOffer, setRawOffer] = useState(null)
   const [qrData, setQrData] = useState(null)
   const [redeemResult, setRedeemResult] = useState(null)
   const [walletPreferences, setWalletPreferences] = useState(() => loadWalletPreferences())
+  const [listening, setListening] = useState(false)
+  const sessionRef = useRef(null)
+
+  const speechRecognition = useMemo(
+    () => resolveSpeechRecognitionFactory(speechRecognitionFactory),
+    [speechRecognitionFactory],
+  )
 
   const mode = walletPreferences.mode
   const typedIntent = walletPreferences.typedIntent
+  const restrictedCategory = useMemo(() => classifyIntent(typedIntent), [typedIntent])
+  const voiceState = !speechRecognition.supported
+    ? 'unsupported'
+    : listening
+      ? 'listening'
+      : 'supported-idle'
 
   const displayOffer = useMemo(() => {
     if (!rawOffer) {
@@ -92,6 +138,15 @@ export default function UserView() {
     return () => clearTimeout(t)
   }, [screen])
 
+  useEffect(() => {
+    return () => {
+      const activeSession = sessionRef.current
+      sessionRef.current = null
+      activeSession?.stop?.()
+      activeSession?.dispose?.()
+    }
+  }, [])
+
   function handleModeChange(nextMode) {
     setWalletPreferences((currentPreferences) => ({
       ...currentPreferences,
@@ -108,6 +163,64 @@ export default function UserView() {
 
   function handleResetPreferences() {
     setWalletPreferences({ ...DEFAULT_WALLET_PREFERENCES })
+  }
+
+  function handleToggleListening() {
+    if (listening) {
+      const activeSession = sessionRef.current
+      sessionRef.current = null
+      setListening(false)
+      activeSession?.stop?.()
+      activeSession?.dispose?.()
+      return
+    }
+
+    if (!speechRecognition.supported || typeof speechRecognition.createSession !== 'function') {
+      setListening(false)
+      return
+    }
+
+    let session = null
+
+    try {
+      session = speechRecognition.createSession()
+
+      session.onResult?.((transcript) => {
+        const nextTypedIntent = normalizeTranscript(transcript)
+
+        if (nextTypedIntent) {
+          handleTypedIntentChange(nextTypedIntent)
+        }
+
+        setListening(false)
+      })
+
+      session.onError?.(() => {
+        if (sessionRef.current === session) {
+          sessionRef.current = null
+        }
+
+        session?.dispose?.()
+        setListening(false)
+      })
+
+      session.onEnd?.(() => {
+        if (sessionRef.current === session) {
+          sessionRef.current = null
+        }
+
+        session?.dispose?.()
+        setListening(false)
+      })
+
+      session.start?.()
+      sessionRef.current = session
+      setListening(true)
+    } catch {
+      sessionRef.current = null
+      session?.dispose?.()
+      setListening(false)
+    }
   }
 
   async function handleClaim() {
@@ -193,6 +306,9 @@ export default function UserView() {
         status={personalizationStatus}
         fallbackReason={fallbackReason}
         onReset={handleResetPreferences}
+        voiceState={voiceState}
+        onToggleListening={handleToggleListening}
+        restrictedCategory={restrictedCategory}
       />
 
       <div style={{ padding: '0 16px 6px', flexShrink: 0 }}>

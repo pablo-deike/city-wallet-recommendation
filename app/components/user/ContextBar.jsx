@@ -70,10 +70,20 @@ export default function ContextBar({
   status = 'ai',
   fallbackReason = null,
   onReset = () => {},
+  voiceState = 'supported-idle',
+  onToggleListening = () => {},
+  restrictedCategory = null,
 }) {
   const isDirty = mode !== 'ai' || typedIntent.length > 0
   const nextMode = mode === 'ai' ? 'off' : 'ai'
   const statusPresentation = getStatusPresentation(status, fallbackReason)
+  const isVoiceUnsupported = voiceState === 'unsupported'
+  const isListening = voiceState === 'listening'
+  const voiceLabel = isListening
+    ? 'Stop voice intent'
+    : isVoiceUnsupported
+      ? 'Voice intent unsupported'
+      : 'Toggle voice intent'
 
   return (
     <div style={{ padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -106,30 +116,68 @@ export default function ContextBar({
           {mode === 'ai' ? 'AI mode' : 'Off mode'}
         </button>
 
-        <div style={{ position: 'relative', flex: '1 1 180px', minWidth: 0 }}>
-          <label htmlFor="wallet-typed-intent" style={srOnlyStyle}>
-            What are you up to?
-          </label>
-          <input
-            id="wallet-typed-intent"
-            type="text"
-            value={typedIntent}
-            onChange={(event) => onTypedIntentChange(event.target.value)}
-            placeholder="What are you up to?"
-            maxLength={WALLET_INTENT_MAX}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flex: '1 1 180px', minWidth: 0 }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+            <label htmlFor="wallet-typed-intent" style={srOnlyStyle}>
+              What are you up to?
+            </label>
+            <input
+              id="wallet-typed-intent"
+              type="text"
+              value={typedIntent}
+              onChange={(event) => onTypedIntentChange(event.target.value)}
+              placeholder="What are you up to?"
+              maxLength={WALLET_INTENT_MAX}
+              style={{
+                width: '100%',
+                minWidth: 0,
+                borderRadius: 14,
+                border: '1px solid rgba(27,42,74,0.12)',
+                background: 'white',
+                color: C.navy,
+                padding: '9px 12px',
+                fontSize: 12,
+                outline: 'none',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+
+          <button
+            type="button"
+            aria-label={voiceLabel}
+            aria-disabled={isVoiceUnsupported ? 'true' : undefined}
+            aria-pressed={isListening}
+            disabled={isVoiceUnsupported}
+            onClick={onToggleListening}
             style={{
-              width: '100%',
-              minWidth: 0,
+              border: 'none',
               borderRadius: 14,
-              border: '1px solid rgba(27,42,74,0.12)',
-              background: 'white',
-              color: C.navy,
-              padding: '9px 12px',
-              fontSize: 12,
-              outline: 'none',
-              boxSizing: 'border-box',
+              padding: '9px 11px',
+              minWidth: 42,
+              background: isVoiceUnsupported
+                ? 'rgba(107, 114, 128, 0.14)'
+                : isListening
+                  ? C.navy
+                  : 'rgba(245, 166, 35, 0.18)',
+              color: isVoiceUnsupported
+                ? C.gray
+                : isListening
+                  ? 'white'
+                  : C.navy,
+              fontSize: 16,
+              fontWeight: 800,
+              cursor: isVoiceUnsupported ? 'not-allowed' : 'pointer',
+              boxShadow: isVoiceUnsupported
+                ? 'inset 0 0 0 1px rgba(107,114,128,0.18)'
+                : isListening
+                  ? '0 4px 12px rgba(27,42,74,0.18)'
+                  : 'inset 0 0 0 1px rgba(245,166,35,0.18)',
+              flexShrink: 0,
             }}
-          />
+          >
+            {isVoiceUnsupported ? '🚫' : '🎙️'}
+          </button>
         </div>
 
         <span
@@ -173,6 +221,26 @@ export default function ContextBar({
           </button>
         ) : null}
       </div>
+
+      {restrictedCategory?.category === 'alcohol' ? (
+        <div
+          data-testid="intent-guardrail"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            alignSelf: 'flex-start',
+            borderRadius: 999,
+            padding: '7px 10px',
+            border: '1px solid rgba(245, 166, 35, 0.34)',
+            background: 'rgba(245, 166, 35, 0.14)',
+            color: C.navy,
+            fontSize: 11,
+            fontWeight: 800,
+          }}
+        >
+          Demo: please drink responsibly. We don't verify age.
+        </div>
+      ) : null}
     </div>
   )
 }
