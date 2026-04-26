@@ -1,9 +1,13 @@
 from datetime import datetime
-import uuid
+import json
 import math
+import os
 import sqlite3
+import uuid
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -128,6 +132,75 @@ class CreateMerchantPayload(BaseModel):
     quiet_threshold: int = 5
     offer_duration: int = 15
 
+PUBLIC_API_BASE_URL = os.environ.get("PUBLIC_API_BASE_URL", "http://localhost:8000")
+
+GOOGLE_PLACES_BY_MERCHANT = {
+    "cafe_mueller": {"place_id": "ChIJN1t_tDeuEmsRUsoyG83frY4"},
+}
+
+
+def build_google_maps_source_image_url(merchant_id: str, lat: float, lon: float) -> str:
+    api_key = os.environ.get("GOOGLE_PLACES_WEATHER_API_KEY") or os.environ.get("GOOGLE_MAPS_API_KEY")
+    place_meta = GOOGLE_PLACES_BY_MERCHANT.get(merchant_id)
+
+    if place_meta and place_meta.get("place_id") and api_key:
+        place_id = place_meta["place_id"]
+        details_params = urlencode({"place_id": place_id, "fields": "photos", "key": api_key})
+        details_url = f"https://maps.googleapis.com/maps/api/place/details/json?{details_params}"
+        try:
+            request = Request(details_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urlopen(request, timeout=3) as response:
+                data = json.loads(response.read().decode("utf-8"))
+            photos = data.get("result", {}).get("photos", [])
+            if photos:
+                photo_reference = photos[0].get("photo_reference")
+                if photo_reference:
+                    photo_params = urlencode({"maxwidth": 800, "photo_reference": photo_reference, "key": api_key})
+                    return f"https://maps.googleapis.com/maps/api/place/photo?{photo_params}"
+        except Exception:
+            pass
+
+    if not api_key:
+        print("WARNING: GOOGLE_PLACES_WEATHER_API_KEY / GOOGLE_MAPS_API_KEY not set")
+
+    static_params = urlencode({
+        "center": f"{lat},{lon}",
+        "zoom": 15,
+        "size": "400x200",
+        "markers": f"color:red|{lat},{lon}",
+        "key": api_key or "",
+    })
+    return f"https://maps.googleapis.com/maps/api/staticmap?{static_params}"
+
+
+def build_google_maps_assets(merchant_id: str, lat: float, lon: float) -> tuple[str, str]:
+    place_meta = GOOGLE_PLACES_BY_MERCHANT.get(merchant_id)
+
+    if place_meta and place_meta.get("place_id"):
+        place_id = place_meta["place_id"]
+        maps_url = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}&query_place_id={place_id}"
+    else:
+        maps_url = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
+
+    maps_image_url = f"{PUBLIC_API_BASE_URL}/maps/place-image/{merchant_id}?lat={lat}&lon={lon}"
+
+    return maps_url, maps_image_url
+
+
+@app.get("/maps/place-image/{merchant_id}")
+def get_place_image(merchant_id: str, lat: float, lon: float):
+    image_source_url = build_google_maps_source_image_url(merchant_id, lat, lon)
+
+    try:
+        request = Request(image_source_url, headers={"User-Agent": "Mozilla/5.0"})
+        with urlopen(request, timeout=8) as response:
+            image_bytes = response.read()
+            content_type = response.info().get_content_type() or "image/jpeg"
+            return Response(content=image_bytes, media_type=content_type)
+    except Exception as exc:
+        print(f"ERROR: failed to fetch place image for {merchant_id}: {exc}")
+        raise HTTPException(status_code=502, detail="Unable to load place image")
+
 cursor.execute("SELECT COUNT(*) FROM merchants")
 if cursor.fetchone()[0] == 0:
     cursor.execute("""
@@ -191,10 +264,14 @@ def generate_offer(ctx: ContextPayload):
     """, (merchant_id,))
     conn.commit()
 
+    maps_url, maps_image_url = build_google_maps_assets(merchant_id, lat, lon)
+
     return {
         "offer_id": offer_id,
         "merchant_id": merchant_id,
         "merchant": name,
+        "merchant_lat": lat,
+        "merchant_lon": lon,
         "discount": discount,
         "emoji": emoji,
         "distance_m": int(distance_m),
@@ -205,6 +282,8 @@ def generate_offer(ctx: ContextPayload):
         "status": "generated",
         "expires_in_seconds": offer_duration * 60,
         "message": f"Offer valid for {offer_duration} minutes",
+        "maps_url": maps_url,
+        "maps_image_url": maps_image_url,
     }
 
 def _claim_offer(offer_id: str, user_id: str):
