@@ -1,15 +1,15 @@
-from fastapi import FastAPI
-from fastapi import HTTPException, Response
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import sqlite3
 from datetime import datetime
-import math
 import json
-import uuid
+import math
 import os
+import sqlite3
+import uuid
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+from fastapi import FastAPI, HTTPException, Response
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from backend.rules import (
     AutoRule,
@@ -95,8 +95,19 @@ class ContextPayload(BaseModel):
     weather: str
     temperature: int
 
-class AcceptPayload(BaseModel):
+class ClaimPayload(BaseModel):
     user_id: str
+
+
+class AcceptPayload(ClaimPayload):
+    pass
+
+
+class RedeemPayload(BaseModel):
+    user_id: str
+    qr_token: str
+    purchase_amount: float = 10.0
+
 
 class CheckoutPayload(BaseModel):
     user_id: str
@@ -133,33 +144,33 @@ def build_google_maps_source_image_url(merchant_id: str, lat: float, lon: float)
     place_meta = GOOGLE_PLACES_BY_MERCHANT.get(merchant_id)
 
     if place_meta and place_meta.get("place_id") and api_key:
-        import requests
         place_id = place_meta["place_id"]
-        details_url = (
-            "https://maps.googleapis.com/maps/api/place/details/json"
-            f"?place_id={place_id}&fields=photos&key={api_key}"
-        )
+        details_params = urlencode({"place_id": place_id, "fields": "photos", "key": api_key})
+        details_url = f"https://maps.googleapis.com/maps/api/place/details/json?{details_params}"
         try:
-            resp = requests.get(details_url, timeout=3)
-            data = resp.json()
+            request = Request(details_url, headers={"User-Agent": "Mozilla/5.0"})
+            with urlopen(request, timeout=3) as response:
+                data = json.loads(response.read().decode("utf-8"))
             photos = data.get("result", {}).get("photos", [])
             if photos:
                 photo_reference = photos[0].get("photo_reference")
                 if photo_reference:
-                    return (
-                        "https://maps.googleapis.com/maps/api/place/photo"
-                        f"?maxwidth=800&photo_reference={photo_reference}&key={api_key}"
-                    )
+                    photo_params = urlencode({"maxwidth": 800, "photo_reference": photo_reference, "key": api_key})
+                    return f"https://maps.googleapis.com/maps/api/place/photo?{photo_params}"
         except Exception:
             pass
 
     if not api_key:
         print("WARNING: GOOGLE_PLACES_WEATHER_API_KEY / GOOGLE_MAPS_API_KEY not set")
 
-    return (
-        "https://maps.googleapis.com/maps/api/staticmap"
-        f"?center={lat},{lon}&zoom=15&size=400x200&markers=color:red%7C{lat},{lon}&key={api_key or ''}"
-    )
+    static_params = urlencode({
+        "center": f"{lat},{lon}",
+        "zoom": 15,
+        "size": "400x200",
+        "markers": f"color:red|{lat},{lon}",
+        "key": api_key or "",
+    })
+    return f"https://maps.googleapis.com/maps/api/staticmap?{static_params}"
 
 
 def build_google_maps_assets(merchant_id: str, lat: float, lon: float) -> tuple[str, str]:
@@ -232,18 +243,21 @@ def generate_offer(ctx: ContextPayload):
 
     if ctx.temperature < 5:
         discount = f"{max_discount}% off any hot drink"
+        emoji = "☕"
         headline = "Warm up nearby"
     else:
         discount = f"{int(max_discount * 0.9)}% off pastry + drink"
+        emoji = "🥐"
         headline = "Treat yourself"
 
-    offer_id = f"offer_{int(datetime.now().timestamp())}"
+    reason = f"Quiet right now - offer valid for {offer_duration} minutes"
+    offer_id = f"offer_{uuid.uuid4().hex[:12]}"
     created_at = datetime.now().isoformat()
 
     cursor.execute("""
     INSERT INTO offers (offer_id, merchant_id, discount, emoji, distance_m, headline, created_at, status)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    """, (offer_id, merchant_id, discount, "treat", int(distance_m), headline, created_at, "generated"))
+    """, (offer_id, merchant_id, discount, emoji, int(distance_m), headline, created_at, "generated"))
 
     cursor.execute("""
     UPDATE merchant_stats SET offers_sent = offers_sent + 1 WHERE merchant_id = ?
@@ -259,19 +273,20 @@ def generate_offer(ctx: ContextPayload):
         "merchant_lat": lat,
         "merchant_lon": lon,
         "discount": discount,
-        "emoji": "treat",
+        "emoji": emoji,
         "distance_m": int(distance_m),
         "headline": headline,
+        "reason": reason,
+        "valid_minutes": offer_duration,
         "created_at": created_at,
         "status": "generated",
-        "expires_in_seconds": 120,
-        "message": "Offer valid for 2 minutes",
+        "expires_in_seconds": offer_duration * 60,
+        "message": f"Offer valid for {offer_duration} minutes",
         "maps_url": maps_url,
         "maps_image_url": maps_image_url,
     }
 
-@app.post("/offers/{offer_id}/accept")
-def accept_offer(offer_id: str, body: AcceptPayload):
+def _claim_offer(offer_id: str, user_id: str):
     cursor.execute("""
     SELECT offer_id, merchant_id, discount, created_at, status
     FROM offers WHERE offer_id = ?
@@ -287,27 +302,46 @@ def accept_offer(offer_id: str, body: AcceptPayload):
     if (datetime.now() - created_time).total_seconds() > 120:
         return {"error": "Offer expired"}
 
-    code = f"{merchant_id[:4].upper()}{int(datetime.now().timestamp()) % 1000}"
+    qr_token = f"QR-{merchant_id[:4].upper()}-{int(datetime.now().timestamp()) % 1000}"
 
     cursor.execute("""
     UPDATE offers SET status = ?, accepted_at = ?, user_id = ?, code = ?
     WHERE offer_id = ?
-    """, ("accepted", datetime.now().isoformat(), body.user_id, code, offer_id))
+    """, ("accepted", datetime.now().isoformat(), user_id, qr_token, offer_id))
     conn.commit()
 
     cursor.execute("SELECT name FROM merchants WHERE merchant_id = ?", (merchant_id,))
     merchant_name = cursor.fetchone()[0]
 
     return {
-        "code": code,
+        "qr_token": qr_token,
         "merchant": merchant_name,
         "discount": discount,
-        "checkout_expires_in": 600,
-        "message": "Show this code at checkout (valid 10 min)"
+        "expires_in_seconds": 600,
     }
 
-@app.post("/offers/{offer_id}/checkout")
-def checkout_offer(offer_id: str, body: CheckoutPayload):
+
+@app.post("/offers/{offer_id}/claim")
+def claim_offer(offer_id: str, body: ClaimPayload):
+    return _claim_offer(offer_id, body.user_id)
+
+
+@app.post("/offers/{offer_id}/accept")
+def accept_offer(offer_id: str, body: AcceptPayload):
+    claim = _claim_offer(offer_id, body.user_id)
+    if "error" in claim:
+        return claim
+
+    return {
+        "code": claim["qr_token"],
+        "merchant": claim["merchant"],
+        "discount": claim["discount"],
+        "checkout_expires_in": claim["expires_in_seconds"],
+        "message": "Show this code at checkout (valid 10 min)",
+    }
+
+
+def _redeem_offer(offer_id: str, user_id: str, token: str, purchase_amount: float):
     cursor.execute("""
     SELECT offer_id, merchant_id, discount, code, status, accepted_at
     FROM offers WHERE offer_id = ?
@@ -322,7 +356,7 @@ def checkout_offer(offer_id: str, body: CheckoutPayload):
     if status != "accepted":
         return {"error": "Offer must be accepted first"}
 
-    if code != body.code:
+    if code != token:
         return {"error": "Invalid code"}
 
     accepted_time = datetime.fromisoformat(accepted_at)
@@ -331,16 +365,16 @@ def checkout_offer(offer_id: str, body: CheckoutPayload):
 
     try:
         discount_percent = int(discount.split("%")[0])
-    except:
+    except (ValueError, IndexError):
         discount_percent = 0
 
-    cashback = (body.purchase_amount * discount_percent) / 100
+    cashback = (purchase_amount * discount_percent) / 100
 
     cursor.execute("""
     INSERT INTO wallets (user_id, balance)
     VALUES (?, ?)
     ON CONFLICT(user_id) DO UPDATE SET balance = balance + ?
-    """, (body.user_id, cashback, cashback))
+    """, (user_id, cashback, cashback))
 
     cursor.execute("""
     UPDATE merchant_stats 
@@ -351,7 +385,7 @@ def checkout_offer(offer_id: str, body: CheckoutPayload):
     cursor.execute("UPDATE offers SET status = ? WHERE offer_id = ?", ("redeemed", offer_id))
     conn.commit()
 
-    cursor.execute("SELECT balance FROM wallets WHERE user_id = ?", (body.user_id,))
+    cursor.execute("SELECT balance FROM wallets WHERE user_id = ?", (user_id,))
     balance = cursor.fetchone()[0]
 
     return {
@@ -360,6 +394,16 @@ def checkout_offer(offer_id: str, body: CheckoutPayload):
         "new_balance": round(balance, 2),
         "message": f"{cashback:.2f} EUR cashback applied"
     }
+
+
+@app.post("/offers/{offer_id}/redeem")
+def redeem_offer(offer_id: str, body: RedeemPayload):
+    return _redeem_offer(offer_id, body.user_id, body.qr_token, body.purchase_amount)
+
+
+@app.post("/offers/{offer_id}/checkout")
+def checkout_offer(offer_id: str, body: CheckoutPayload):
+    return _redeem_offer(offer_id, body.user_id, body.code, body.purchase_amount)
 
 @app.post("/offers/{offer_id}/dismiss")
 def dismiss_offer(offer_id: str, body: DismissPayload):
@@ -432,6 +476,27 @@ def get_offer_feed(merchant_id: str):
         "offers": offers,
     }
 
+
+@app.get("/merchant/{merchant_id}/rules")
+def get_merchant_rules(merchant_id: str):
+    if not merchant_exists(merchant_id):
+        return {"error": f"Merchant {merchant_id} not found"}
+
+    cursor.execute("""
+    SELECT max_discount, quiet_threshold, offer_duration
+    FROM merchants WHERE merchant_id = ?
+    """, (merchant_id,))
+    max_discount, quiet_threshold, offer_duration = cursor.fetchone()
+
+    return {
+        "merchant_id": merchant_id,
+        "max_discount": max_discount,
+        "quiet_threshold": quiet_threshold,
+        "offer_duration": offer_duration,
+        "goal": "Fill quiet hours with nearby wallet offers",
+    }
+
+
 @app.put("/merchant/{merchant_id}/rules")
 def update_merchant_rules(merchant_id: str, body: UpdateRulesPayload):
     if not merchant_exists(merchant_id):
@@ -501,6 +566,7 @@ def get_auto_rules(merchant_id: str):
             "trigger_source": meta.get("trigger_source", "user_history").value,
             "enabled": rule.enabled,
             "discount_percent": rule.discount_percent,
+            "offer_duration_minutes": rule.offer_duration_minutes,
             "trigger_config": rule.trigger_config,
             "created_at": rule.created_at.isoformat(),
             "updated_at": rule.updated_at.isoformat(),
@@ -523,6 +589,7 @@ def create_auto_rule(merchant_id: str, body: AutoRuleCreate):
         enabled=body.enabled,
         discount_percent=body.discount_percent,
         trigger_config=body.trigger_config,
+        offer_duration_minutes=body.offer_duration_minutes or 30,
         created_at=now,
         updated_at=now,
     )
@@ -538,6 +605,7 @@ def create_auto_rule(merchant_id: str, body: AutoRuleCreate):
             "name": meta.get("name", rule.rule_type.value),
             "enabled": rule.enabled,
             "discount_percent": rule.discount_percent,
+            "offer_duration_minutes": rule.offer_duration_minutes,
             "trigger_config": rule.trigger_config,
         },
     }
@@ -560,6 +628,8 @@ def update_auto_rule(merchant_id: str, rule_id: str, body: AutoRuleUpdate):
         rule.discount_percent = body.discount_percent
     if body.trigger_config is not None:
         rule.trigger_config = body.trigger_config
+    if body.offer_duration_minutes is not None:
+        rule.offer_duration_minutes = body.offer_duration_minutes
 
     rule.updated_at = datetime.now()
 
@@ -570,6 +640,7 @@ def update_auto_rule(merchant_id: str, rule_id: str, body: AutoRuleUpdate):
             "rule_type": rule.rule_type.value,
             "enabled": rule.enabled,
             "discount_percent": rule.discount_percent,
+            "offer_duration_minutes": rule.offer_duration_minutes,
             "trigger_config": rule.trigger_config,
         },
     }
@@ -602,6 +673,7 @@ def get_special_offers(merchant_id: str):
             "description": offer.description,
             "discount_percent": offer.discount_percent,
             "product_category": offer.product_category,
+            "product_name": offer.product_name,
             "start_time": offer.start_time.isoformat() if offer.start_time else None,
             "end_time": offer.end_time.isoformat() if offer.end_time else None,
             "max_redemptions": offer.max_redemptions,
@@ -628,6 +700,7 @@ def create_special_offer(merchant_id: str, body: SpecialOfferCreate):
         description=body.description,
         discount_percent=body.discount_percent,
         product_category=body.product_category,
+        product_name=body.product_name,
         start_time=body.start_time,
         end_time=body.end_time,
         max_redemptions=body.max_redemptions,
@@ -647,6 +720,7 @@ def create_special_offer(merchant_id: str, body: SpecialOfferCreate):
             "description": offer.description,
             "discount_percent": offer.discount_percent,
             "product_category": offer.product_category,
+            "product_name": offer.product_name,
             "active": offer.active,
         },
     }
@@ -688,6 +762,7 @@ def update_special_offer(merchant_id: str, offer_id: str, body: SpecialOfferUpda
             "offer_id": offer.offer_id,
             "title": offer.title,
             "discount_percent": offer.discount_percent,
+            "product_name": offer.product_name,
             "active": offer.active,
         },
     }

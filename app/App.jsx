@@ -1,16 +1,25 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { Compass, Clock } from 'lucide-react'
+import { Compass, Clock, Sparkles } from 'lucide-react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { QRCodeSVG } from 'qrcode.react'
 import { generateOffer, claimOffer, redeemOffer, dismissOffer } from './api'
+import { loadGemma4WebHumanizer } from './lib/localPersonalization'
+import { resolveDisplayOffer } from './lib/localPersonalization/resolveDisplayOffer'
+import {
+  appendPreferenceEntry,
+  loadPreferenceHistory,
+  mergePreferenceIntent,
+  removePreferenceEntry,
+  savePreferenceHistory,
+} from './lib/preferenceHistory'
+import PreferenceSheet from './PreferenceSheet'
 import MerchantView from './MerchantView'
 import vicoLogo from './images/vico-logo.svg'
 
 const DEFAULT_LOC = { lat: 48.1351, lon: 11.5820 }
 const BASE_PRICE = 4.90
-
 
 // ── Small tappable map thumbnail ─────────────────────────────────────────────
 function MapThumb({ mapsUrl, mapsImageUrl, size = 56, radius = 10 }) {
@@ -20,6 +29,78 @@ function MapThumb({ mapsUrl, mapsImageUrl, size = 56, radius = 10 }) {
       <img src={mapsImageUrl} alt="map" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
     </a>
   )
+}
+
+function getBrowserLocale() {
+  try {
+    return navigator.language || 'en-US'
+  } catch {
+    return 'en-US'
+  }
+}
+
+function buildLocalContext(userLocation, history, preferenceState) {
+  const recentRedemptions = history.slice(0, 5).map(item => ({
+    merchant: item.merchant,
+    discount: item.discount,
+    redeemedAt: item.date,
+  }))
+  const merchantCounts = recentRedemptions.reduce((acc, item) => {
+    if (!item.merchant) return acc
+    acc[item.merchant] = (acc[item.merchant] ?? 0) + 1
+    return acc
+  }, {})
+  const repeatMerchants = Object.entries(merchantCounts)
+    .filter(([, count]) => count > 1)
+    .map(([merchant]) => merchant)
+
+  return {
+    locale: getBrowserLocale(),
+    weather: 'overcast',
+    temperature: 11,
+    localTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    userLocation: userLocation
+      ? { lat: userLocation.lat, lon: userLocation.lon }
+      : null,
+    acceptedOfferCount: history.length,
+    recentRedemptions,
+    repeatMerchants,
+    userIntent: preferenceState?.intent ?? '',
+    preferenceEntries: preferenceState?.entries ?? [],
+  }
+}
+
+function getActiveOfferId(displayOffer, rawOffer) {
+  return displayOffer?.offer_id ?? rawOffer?.offer_id ?? null
+}
+
+function getOfferEmoji(displayOffer) {
+  const value = typeof displayOffer?.emoji === 'string' ? displayOffer.emoji.trim() : ''
+  const [firstEmoji = '✨'] = Array.from(value)
+
+  return firstEmoji
+}
+
+function getSupportNote(displayOffer) {
+  const modelNote =
+    typeof displayOffer?.support_note === 'string' ? displayOffer.support_note.trim() : ''
+
+  if (modelNote) {
+    return modelNote
+  }
+
+  if (displayOffer?.merchant) {
+    return `Nice pick - ${displayOffer.merchant} is close by.`
+  }
+
+  return 'Nice pick - a quick local treat is close by.'
+}
+
+function getOfferEmojiSet(displayOffer) {
+  return [getOfferEmoji(displayOffer), '😊', '✨']
+    .filter(Boolean)
+    .filter((emoji, index, emojis) => emojis.indexOf(emoji) === index)
+    .slice(0, 3)
 }
 
 // ── Vanilla Leaflet map ───────────────────────────────────────────────────────
@@ -98,29 +179,145 @@ export default function App() {
   const [view, setView] = useState('select')
   const [subTab, setSubTab] = useState('explore')
   const [screen, setScreen] = useState('offer')
+  const [rawOffer, setRawOffer] = useState(null)
   const [offer, setOffer] = useState(null)
   const [qrData, setQrData] = useState(null)
   const [userLocation, setUserLocation] = useState(null)
   const [paying, setPaying] = useState(false)
   const [history, setHistory] = useState([])
   const [expandedQr, setExpandedQr] = useState(null)
+  const [localRuntime, setLocalRuntime] = useState(null)
+  const [localRuntimeReady, setLocalRuntimeReady] = useState(false)
+  const [preferenceHistory, setPreferenceHistory] = useState(() => loadPreferenceHistory())
+  const [preferenceSheetMode, setPreferenceSheetMode] = useState('closed')
+  const [onboardingShown, setOnboardingShown] = useState(false)
 
+  const preferenceIntent = useMemo(() => mergePreferenceIntent(preferenceHistory), [preferenceHistory])
   const cafeLocation = offer?.merchant_lat && offer?.merchant_lon ? { lat: offer.merchant_lat, lon: offer.merchant_lon } : null
+  const localContext = useMemo(
+    () => buildLocalContext(userLocation, history, { intent: preferenceIntent, entries: preferenceHistory }),
+    [userLocation, history, preferenceIntent, preferenceHistory],
+  )
+  const offerEmoji = getOfferEmoji(offer)
+  const offerEmojiSet = getOfferEmojiSet(offer)
+  const supportNote = getSupportNote(offer)
 
   // Parse discount % from strings like "15% off any hot drink"
   const discountPct = offer ? (parseInt(offer.discount) || 0) : 0
   const savings = parseFloat((BASE_PRICE * discountPct / 100).toFixed(2))
   const youPay = parseFloat((BASE_PRICE - savings).toFixed(2))
 
+  const fetchOfferForLocation = useCallback(
+    (lat, lon) => generateOffer(lat, lon).then(setRawOffer).catch(() => {}),
+    [],
+  )
+
+  const handleAddPreferenceEntry = useCallback(({ source, content }) => {
+    let didAdd = false
+    setPreferenceHistory(prev => {
+      const next = appendPreferenceEntry(prev, { source, content })
+      didAdd = next.length !== prev.length || next[0]?.id !== prev[0]?.id
+      const sanitized = savePreferenceHistory(next)
+      return sanitized
+    })
+    return didAdd
+  }, [])
+
+  const handleRemovePreferenceEntry = useCallback(entryId => {
+    setPreferenceHistory(prev => {
+      const next = removePreferenceEntry(prev, entryId)
+      return savePreferenceHistory(next)
+    })
+  }, [])
+
   useEffect(() => {
-    const fetchOffer = (lat, lon) => generateOffer(lat, lon).then(setOffer).catch(() => { })
-    if (!navigator.geolocation) { setUserLocation(DEFAULT_LOC); fetchOffer(DEFAULT_LOC.lat, DEFAULT_LOC.lon); return }
+    if (view !== 'user') return
+    if (onboardingShown) return
+
+    setPreferenceSheetMode('onboarding')
+    setOnboardingShown(true)
+  }, [view, onboardingShown])
+
+  useEffect(() => {
+    if (view !== 'user') return
+    if (preferenceSheetMode === 'onboarding') return
+    if (userLocation) return
+
+    if (!navigator.geolocation) {
+      setUserLocation(DEFAULT_LOC)
+      fetchOfferForLocation(DEFAULT_LOC.lat, DEFAULT_LOC.lon)
+      return
+    }
     navigator.geolocation.getCurrentPosition(
-      pos => { const loc = { lat: pos.coords.latitude, lon: pos.coords.longitude }; setUserLocation(loc); fetchOffer(loc.lat, loc.lon) },
-      () => { setUserLocation(DEFAULT_LOC); fetchOffer(DEFAULT_LOC.lat, DEFAULT_LOC.lon) },
+      pos => {
+        const loc = { lat: pos.coords.latitude, lon: pos.coords.longitude }
+        setUserLocation(loc)
+        fetchOfferForLocation(loc.lat, loc.lon)
+      },
+      () => {
+        setUserLocation(DEFAULT_LOC)
+        fetchOfferForLocation(DEFAULT_LOC.lat, DEFAULT_LOC.lon)
+      },
       { timeout: 8000, maximumAge: 60000 }
     )
-  }, [])
+  }, [view, preferenceSheetMode, userLocation, fetchOfferForLocation])
+
+  useEffect(() => {
+    if (view !== 'user') return
+
+    let cancelled = false
+    let shell = null
+
+    setLocalRuntimeReady(false)
+    loadGemma4WebHumanizer()
+      .then(loadedShell => {
+        shell = loadedShell
+
+        if (cancelled) {
+          loadedShell?.dispose?.()
+          return
+        }
+
+        setLocalRuntime(loadedShell)
+        setLocalRuntimeReady(true)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setLocalRuntime(null)
+          setLocalRuntimeReady(true)
+        }
+      })
+
+    return () => {
+      cancelled = true
+      shell?.dispose?.()
+    }
+  }, [view])
+
+  useEffect(() => {
+    let cancelled = false
+
+    if (!rawOffer) {
+      setOffer(null)
+      return () => {
+        cancelled = true
+      }
+    }
+
+    resolveDisplayOffer(
+      rawOffer,
+      localContext,
+      localRuntimeReady ? localRuntime : null,
+    ).then(displayOffer => {
+      if (!cancelled) {
+        setOffer(displayOffer)
+      }
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [rawOffer, localContext, localRuntime, localRuntimeReady])
 
   useEffect(() => {
     if (screen !== 'dismissed') return
@@ -136,17 +333,23 @@ export default function App() {
   }, [screen, offer])
 
   async function handleAccept() {
-    try { const data = await claimOffer(offer.offer_id); setQrData(data) } catch { }
+    const offerId = getActiveOfferId(offer, rawOffer)
+    if (!offerId) return
+
+    try { const data = await claimOffer(offerId); setQrData(data) } catch {}
     setScreen('payment')
   }
 
   async function handlePay() {
+    const offerId = getActiveOfferId(offer, rawOffer)
+    if (!offerId) return
+
     setPaying(true)
     try {
-      const token = qrData?.qr_token ?? `QR-FALLBACK-${offer.offer_id}`
-      await redeemOffer(offer.offer_id, token, BASE_PRICE)
+      const token = qrData?.qr_token ?? `QR-FALLBACK-${offerId}`
+      await redeemOffer(offerId, token, BASE_PRICE)
       setHistory(prev => [{
-        id: offer.offer_id,
+        id: offerId,
         merchant: offer.merchant,
         discount: offer.discount,
         mapsUrl: offer.maps_url,
@@ -160,7 +363,37 @@ export default function App() {
     setScreen('qr')
   }
 
-  async function handleReject() { dismissOffer(offer.offer_id).catch(() => { }); setScreen('dismissed') }
+  async function handleReject() {
+    const offerId = getActiveOfferId(offer, rawOffer)
+    if (!offerId) return
+
+    dismissOffer(offerId).catch(() => {})
+    setScreen('dismissed')
+  }
+
+  function handleOpenPreferences() {
+    setPreferenceSheetMode('map')
+  }
+
+  function handleClosePreferences() {
+    if (preferenceSheetMode === 'onboarding') {
+      setPreferenceSheetMode('closed')
+      return
+    }
+
+    setPreferenceSheetMode('closed')
+  }
+
+  function handleSkipOnboarding() {
+    setPreferenceSheetMode('closed')
+  }
+
+  function handlePrimaryPreferences() {
+    const targetLocation = userLocation ?? DEFAULT_LOC
+    setPreferenceSheetMode('closed')
+    setScreen('offer')
+    fetchOfferForLocation(targetLocation.lat, targetLocation.lon)
+  }
 
   if (view === 'select') return <RoleSelect onSelect={setView} />
   if (view === 'merchant') return <MerchantView onBack={() => setView('select')} />
@@ -180,6 +413,51 @@ export default function App() {
           <>
             <LeafletMap userLocation={userLocation} cafeLocation={cafeLocation} />
 
+            {/* Floating preference button */}
+            {(screen === 'offer' || screen === 'dismissed') && (
+              <button
+                onClick={handleOpenPreferences}
+                aria-label="Tune my offer"
+                style={{
+                  position: 'absolute',
+                  top: 16,
+                  right: 16,
+                  zIndex: 1100,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '10px 14px',
+                  background: 'rgba(255,255,255,0.96)',
+                  border: '1px solid #dbe3ef',
+                  borderRadius: 999,
+                  color: '#111827',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  boxShadow: '0 8px 20px rgba(15,23,42,0.12)',
+                  backdropFilter: 'blur(8px)',
+                  WebkitBackdropFilter: 'blur(8px)',
+                }}
+              >
+                <Sparkles size={14} color="#5b9af5" />
+                Tune my offer
+                {preferenceHistory.length > 0 && (
+                  <span
+                    style={{
+                      background: '#eef4ff',
+                      color: '#5b9af5',
+                      borderRadius: 999,
+                      padding: '1px 7px',
+                      fontSize: 10,
+                      fontWeight: 800,
+                    }}
+                  >
+                    {preferenceHistory.length}
+                  </span>
+                )}
+              </button>
+            )}
+
             {/* Offer card */}
             <AnimatePresence>
               {screen === 'offer' && offer && (
@@ -194,14 +472,33 @@ export default function App() {
                     </div>
                     <div style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                        <MapThumb mapsUrl={offer.maps_url} mapsImageUrl={offer.maps_image_url} size={56} />
+                        <div style={{ position: 'relative', width: 56, height: 56, flexShrink: 0 }}>
+                          <MapThumb mapsUrl={offer.maps_url} mapsImageUrl={offer.maps_image_url} size={56} />
+                          <div aria-hidden="true" style={{ position: 'absolute', right: -6, bottom: -6, width: 28, height: 28, borderRadius: 14, background: '#fff7ed', border: '1px solid #fed7aa', boxShadow: '0 6px 14px rgba(15,23,42,0.14)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>
+                            {offerEmoji}
+                          </div>
+                        </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
                             <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b7280', margin: 0 }}>{offer.merchant}</p>
                             <span style={{ background: '#eef4ff', borderRadius: 999, padding: '2px 8px', fontSize: 11, fontWeight: 700, color: '#5b9af5', flexShrink: 0 }}>{offer.distance_m}m</span>
                           </div>
-                          <h2 style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.3, color: '#111827', letterSpacing: '-0.2px', margin: 0 }}>{offer.discount}</h2>
+                          <h2 style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.3, color: '#111827', letterSpacing: '-0.2px', margin: 0 }}>{offer.headline || offer.discount}</h2>
+                          <div style={{ display: 'inline-flex', marginTop: 7, background: '#eef4ff', borderRadius: 999, padding: '3px 9px', fontSize: 11, fontWeight: 700, color: '#5b9af5' }}>{offer.discount}</div>
                         </div>
+                      </div>
+                      {offer.reason && (
+                        <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.4, color: '#6b7280' }}>{offer.reason}</p>
+                      )}
+                      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 12, padding: '8px 10px' }}>
+                        <div aria-hidden="true" style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                          {offerEmojiSet.map((emoji, index) => (
+                            <span key={`${emoji}-${index}`} style={{ width: 22, height: 22, marginLeft: index === 0 ? 0 : -6, borderRadius: 11, background: '#ffffff', border: '1px solid #fed7aa', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, boxShadow: '0 2px 8px rgba(15,23,42,0.08)' }}>
+                              {emoji}
+                            </span>
+                          ))}
+                        </div>
+                        <p style={{ margin: 0, fontSize: 12, lineHeight: 1.35, color: '#92400e', fontWeight: 700 }}>{supportNote}</p>
                       </div>
                       <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
                         <button onClick={handleAccept} style={{ flex: 1, background: '#5b9af5', color: 'white', border: 'none', borderRadius: 12, padding: '13px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 4px 16px rgba(91,154,245,0.3)' }}>Accept</button>
@@ -373,6 +670,17 @@ export default function App() {
             )}
           </div>
         )}
+
+        <PreferenceSheet
+          open={preferenceSheetMode !== 'closed'}
+          mode={preferenceSheetMode === 'onboarding' ? 'onboarding' : 'map'}
+          history={preferenceHistory}
+          onAddEntry={handleAddPreferenceEntry}
+          onRemoveEntry={handleRemovePreferenceEntry}
+          onPrimary={handlePrimaryPreferences}
+          onSkip={handleSkipOnboarding}
+          onClose={handleClosePreferences}
+        />
       </main>
 
       {/* Bottom nav */}
