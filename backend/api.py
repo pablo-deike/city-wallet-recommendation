@@ -256,6 +256,8 @@ def generate_offer(ctx: ContextPayload):
         "offer_id": offer_id,
         "merchant_id": merchant_id,
         "merchant": name,
+        "merchant_lat": lat,
+        "merchant_lon": lon,
         "discount": discount,
         "emoji": "treat",
         "distance_m": int(distance_m),

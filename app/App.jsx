@@ -8,11 +8,7 @@ import { generateOffer, claimOffer, redeemOffer, dismissOffer } from './api'
 import MerchantView from './MerchantView'
 import vicoLogo from './images/vico-logo.svg'
 
-const MERCHANT_COORDS = {
-  cafe_mueller: { lat: 52.5200, lon: 13.4050 },
-  pizza_place: { lat: 52.5210, lon: 13.4060 },
-}
-const DEFAULT_LOC = { lat: 52.5185, lon: 13.4010 }
+const DEFAULT_LOC = { lat: 48.1351, lon: 11.5820 }
 const BASE_PRICE = 4.90
 
 
@@ -109,7 +105,7 @@ export default function App() {
   const [history, setHistory] = useState([])
   const [expandedQr, setExpandedQr] = useState(null)
 
-  const cafeLocation = offer?.merchant_id ? MERCHANT_COORDS[offer.merchant_id] ?? null : null
+  const cafeLocation = offer?.merchant_lat && offer?.merchant_lon ? { lat: offer.merchant_lat, lon: offer.merchant_lon } : null
 
   // Parse discount % from strings like "15% off any hot drink"
   const discountPct = offer ? (parseInt(offer.discount) || 0) : 0
