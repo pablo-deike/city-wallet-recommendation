@@ -8,7 +8,6 @@ dist-ssr/
 # Local browser model artifacts
 app/public/models/*.task
 app/public/models/*.litertlm
-app/public/models/*.partial
 !app/public/models/README.md
 
 # Vite
@@ -40,3 +39,27 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+.omx/
+AGENTS.md
+CLAUDE.md
+.github
+.codex
+.bg-shell
+.gsd
+.gsd-id
+.mcp.json
+.bg-shell/
+*~
+*.code-workspace
+.env.*
+!.env.example
+.next/
+build/
+*.pyc
+target/
+vendor/
+coverage/
+.cache/
+tmp/
+package.json
+package-lock.json
