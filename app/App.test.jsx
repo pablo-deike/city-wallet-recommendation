@@ -53,6 +53,10 @@ vi.mock('./api', () => ({
   claimOffer: vi.fn(),
   redeemOffer: vi.fn(),
   dismissOffer: vi.fn(),
+  getNearbyMerchants: vi.fn(async () => ({
+    count: 0,
+    merchants: [],
+  })),
 }))
 
 vi.mock('./lib/localPersonalization', () => ({

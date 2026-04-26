@@ -248,8 +248,21 @@ export default function MerchantView({ onBack }) {
     handleCreateAutoOffer('quiet_hour', quietDiscount, { density_threshold: quietThreshold }, offerDuration, quietProduct)
   }, [handleCreateAutoOffer, quietDiscount, quietThreshold, offerDuration, quietProduct])
 
+  const weatherRuleEnabled = coldEnabled || rainEnabled || hotEnabled
+
   const saveWeather = useCallback(() => {
-    handleCreateAutoOffer('weather_match', 10, {
+    const enabledDiscounts = [
+      coldEnabled ? coldDiscount : null,
+      rainEnabled ? rainDiscount : null,
+      hotEnabled ? hotDiscount : null,
+    ].filter(discount => discount !== null)
+
+    if (enabledDiscounts.length === 0) {
+      showConfirmToast('Choose at least one weather trigger')
+      return
+    }
+
+    handleCreateAutoOffer('weather_match', Math.max(...enabledDiscounts), {
       cold_enabled: coldEnabled,
       cold_temp_c: coldTemp,
       cold_discount_percent: coldDiscount,
@@ -262,26 +275,42 @@ export default function MerchantView({ onBack }) {
       hot_discount_percent: hotDiscount,
       hot_product: hotProducts.filter(p => p).join(', '),
     }, offerDuration)
-  }, [handleCreateAutoOffer, coldEnabled, coldTemp, coldDiscount, coldProducts, rainEnabled, rainDiscount, rainProducts, hotEnabled, hotTemp, hotDiscount, hotProducts, offerDuration])
+  }, [handleCreateAutoOffer, showConfirmToast, coldEnabled, coldTemp, coldDiscount, coldProducts, rainEnabled, rainDiscount, rainProducts, hotEnabled, hotTemp, hotDiscount, hotProducts, offerDuration])
 
   const handleCreateSpecialOffer = useCallback(async () => {
     try {
       const res = await createSpecialOffer(newOffer)
-      if (res.success) {
-        setSpecialOffers(prev => [...prev, { ...newOffer, offer_id: res.offer.offer_id, active: true, redemptions_count: 0 }])
+      if (res && res.success) {
+        setSpecialOffers(prev => [...(prev ?? []), res.offer])
         setNewOffer({ title: '', description: '', discount_percent: 15, product_category: 'coffee', product_name: '' })
         setShowModal(null)
         setSpecialCountdown(specialTimer * 60)
+        showConfirmToast('Offer created')
+      } else {
+        console.error('Failed to create special offer - response:', res)
+        showConfirmToast(res?.error || 'Failed to create offer')
       }
-    } catch {}
-  }, [newOffer, specialTimer])
+    } catch (e) {
+      console.error('Failed to create special offer - exception:', e)
+      showConfirmToast('Network error - is server running?')
+    }
+  }, [newOffer, specialTimer, showConfirmToast])
 
   const handleDeleteSpecialOffer = useCallback(async (offerId) => {
     try {
-      await deleteSpecialOffer(offerId)
-      setSpecialOffers(prev => prev.filter(o => o.offer_id !== offerId))
-    } catch {}
-  }, [])
+      const res = await deleteSpecialOffer(offerId)
+      if (res && res.success) {
+        setSpecialOffers(prev => (prev ?? []).filter(o => o.offer_id !== offerId))
+        showConfirmToast('Offer deleted')
+      } else {
+        console.error('Failed to delete special offer - response:', res)
+        showConfirmToast(res?.error || 'Failed to delete offer')
+      }
+    } catch (e) {
+      console.error('Failed to delete special offer - exception:', e)
+      showConfirmToast('Network error')
+    }
+  }, [showConfirmToast])
 
   const addLoyaltyProduct = useCallback(() => setLoyaltyProducts(prev => [...prev, '']), [])
   const updateLoyaltyProduct = useCallback((i, v) => setLoyaltyProducts(prev => prev.map((p, idx) => idx === i ? v : p)), [])
@@ -317,6 +346,8 @@ export default function MerchantView({ onBack }) {
       showConfirmToast('Location claimed successfully')
     } catch {}
   }, [showConfirmToast])
+
+  const canCreateSpecialOffer = Boolean(newOffer.title.trim() && newOffer.description.trim())
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative', display: 'flex', flexDirection: 'column', background: '#f5f7fb' }}>
@@ -497,7 +528,7 @@ export default function MerchantView({ onBack }) {
                       )}
                     </div>
 
-                    <button onClick={saveWeather} style={{ width: '100%', background: C.accent, color: 'white', border: 'none', borderRadius: 10, padding: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', marginTop: 12 }}>Create Offer</button>
+                    <button onClick={saveWeather} disabled={!weatherRuleEnabled} style={{ width: '100%', background: weatherRuleEnabled ? C.accent : '#93c5fd', color: 'white', border: 'none', borderRadius: 10, padding: 10, fontSize: 13, fontWeight: 700, cursor: weatherRuleEnabled ? 'pointer' : 'not-allowed', marginTop: 12 }}>Create Offer</button>
                   </div>
                 </RuleCard>
               </div>
@@ -595,7 +626,7 @@ export default function MerchantView({ onBack }) {
               <SliderField label="Discount" value={newOffer.discount_percent} onChange={v => setNewOffer(prev => ({ ...prev, discount_percent: v }))} />
             </div>
 
-            <button onClick={handleCreateSpecialOffer} disabled={!newOffer.title} style={{ width: '100%', background: newOffer.title ? C.accent : '#93c5fd', color: 'white', border: 'none', borderRadius: 14, padding: 15, fontSize: 16, fontWeight: 700, cursor: newOffer.title ? 'pointer' : 'not-allowed', marginTop: 4 }}>Create Offer</button>
+            <button onClick={handleCreateSpecialOffer} disabled={!canCreateSpecialOffer} style={{ width: '100%', background: canCreateSpecialOffer ? C.accent : '#93c5fd', color: 'white', border: 'none', borderRadius: 14, padding: 15, fontSize: 16, fontWeight: 700, cursor: canCreateSpecialOffer ? 'pointer' : 'not-allowed', marginTop: 4 }}>Create Offer</button>
           </div>
         </div>
       )}

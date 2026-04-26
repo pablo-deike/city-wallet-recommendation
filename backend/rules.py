@@ -4,7 +4,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class AutoRuleType(str, Enum):
@@ -49,12 +49,26 @@ class AutoRuleCreate(BaseModel):
     trigger_config: dict
     offer_duration_minutes: Optional[int] = None
 
+    @field_validator("discount_percent")
+    @classmethod
+    def validate_discount_percent(cls, value: int) -> int:
+        if value < 0 or value > 100:
+            raise ValueError("discount_percent must be between 0 and 100")
+        return value
+
 
 class AutoRuleUpdate(BaseModel):
     enabled: Optional[bool] = None
     discount_percent: Optional[int] = None
     trigger_config: Optional[dict] = None
     offer_duration_minutes: Optional[int] = None
+
+    @field_validator("discount_percent")
+    @classmethod
+    def validate_discount_percent(cls, value: Optional[int]) -> Optional[int]:
+        if value is not None and (value < 0 or value > 100):
+            raise ValueError("discount_percent must be between 0 and 100")
+        return value
 
 
 class SpecialOffer(BaseModel):
@@ -84,6 +98,20 @@ class SpecialOfferCreate(BaseModel):
     end_time: Optional[datetime] = None
     max_redemptions: Optional[int] = None
 
+    @field_validator("title", "description")
+    @classmethod
+    def validate_required_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("title and description must not be empty")
+        return value.strip()
+
+    @field_validator("discount_percent")
+    @classmethod
+    def validate_discount_percent(cls, value: int) -> int:
+        if value < 0 or value > 100:
+            raise ValueError("discount_percent must be between 0 and 100")
+        return value
+
 
 class SpecialOfferUpdate(BaseModel):
     title: Optional[str] = None
@@ -95,6 +123,20 @@ class SpecialOfferUpdate(BaseModel):
     end_time: Optional[datetime] = None
     max_redemptions: Optional[int] = None
     active: Optional[bool] = None
+
+    @field_validator("title", "description")
+    @classmethod
+    def validate_required_text(cls, value: Optional[str]) -> Optional[str]:
+        if value is not None and not value.strip():
+            raise ValueError("title and description must not be empty")
+        return value.strip() if value is not None else value
+
+    @field_validator("discount_percent")
+    @classmethod
+    def validate_discount_percent(cls, value: Optional[int]) -> Optional[int]:
+        if value is not None and (value < 0 or value > 100):
+            raise ValueError("discount_percent must be between 0 and 100")
+        return value
 
 
 class AutoOfferInstance(BaseModel):
@@ -115,6 +157,13 @@ class AutoOfferCreate(BaseModel):
     trigger_config: dict
     offer_duration_minutes: Optional[int] = None
     product_name: Optional[str] = None
+
+    @field_validator("discount_percent")
+    @classmethod
+    def validate_discount_percent(cls, value: int) -> int:
+        if value < 0 or value > 100:
+            raise ValueError("discount_percent must be between 0 and 100")
+        return value
 
 
 AUTO_RULE_DEFAULTS = {
@@ -233,9 +282,10 @@ def evaluate_auto_rules(
     merchant_id: str,
     user_id: str,
     context: dict,
+    create_defaults: bool = True,
 ) -> list[AutoRule]:
     rules = get_merchant_auto_rules(merchant_id)
-    if not rules:
+    if not rules and create_defaults:
         rules = create_default_auto_rules(merchant_id)
     
     matching_rules = []
