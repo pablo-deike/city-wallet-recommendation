@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+
 *, *::before, *::after {
   box-sizing: border-box;
   margin: 0;
@@ -5,8 +7,8 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  background: #C8CACE;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: #eef2f7;
   min-height: 100vh;
   display: flex;
   justify-content: center;
@@ -17,12 +19,70 @@ body {
   width: 100%;
   max-width: 390px;
   height: 100vh;
-  background: #F0F2F5;
+  background: #ffffff;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 0 60px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 20px 60px rgba(15, 23, 42, 0.12);
   position: relative;
   overflow: hidden;
+}
+
+@keyframes ping {
+  75%, 100% { transform: scale(2.2); opacity: 0; }
+}
+.location-pulse {
+  animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+  pointer-events: none;
+}
+
+/* ── Leaflet map (dark tile style) ── */
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+}
+.leaflet-tile-pane {
+  filter: saturate(0.95) contrast(1.02) brightness(1.02);
+}
+.leaflet-control-attribution {
+  font-size: 9px !important;
+  opacity: 0.7;
+  background: rgba(255,255,255,0.85) !important;
+  color: #6b7280 !important;
+}
+.leaflet-control-attribution a { color: #6b7280 !important; }
+
+/* User location marker */
+.user-marker-dot {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #5b9af5;
+  border: 3px solid #ffffff;
+  box-shadow: 0 4px 16px rgba(91, 154, 245, 0.5);
+  z-index: 1;
+}
+.user-marker-pulse {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  background: #5b9af5;
+  opacity: 0.25;
+  animation: ping 1.5s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* Café location marker */
+.cafe-marker {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: #ffffff;
+  border: 3px solid #5b9af5;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
+  line-height: 1;
 }
 
 input[type='range'] {
@@ -31,55 +91,26 @@ input[type='range'] {
   width: 100%;
   height: 6px;
   border-radius: 3px;
-  background: #e5e7eb;
+  background: #dbe3ef;
   outline: none;
   cursor: pointer;
 }
 input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
-  appearance: none;
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #f5a623;
-  box-shadow: 0 2px 6px rgba(245, 166, 35, 0.5);
+  background: #5b9af5;
+  box-shadow: 0 2px 6px rgba(91, 154, 245, 0.4);
 }
 input[type='range']::-moz-range-thumb {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: #f5a623;
+  background: #5b9af5;
   border: none;
-  box-shadow: 0 2px 6px rgba(245, 166, 35, 0.5);
+  box-shadow: 0 2px 6px rgba(91, 154, 245, 0.4);
 }
-
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes fadeIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(32px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes scaleIn {
-  from { opacity: 0; transform: scale(0.88); }
-  to   { opacity: 1; transform: scale(1); }
-}
-@keyframes popIn {
-  0%   { transform: scale(0);   opacity: 0; }
-  60%  { transform: scale(1.2); opacity: 1; }
-  100% { transform: scale(1);   opacity: 1; }
-}
-
-.anim-fade-in-up { animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-.anim-slide-up   { animation: slideUp  0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-.anim-scale-in   { animation: scaleIn  0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
-.anim-fade-in    { animation: fadeIn   0.3s ease forwards; }
-.anim-pop-in     { animation: popIn    0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
 
 ::-webkit-scrollbar { display: none; }
 * { scrollbar-width: none; }
