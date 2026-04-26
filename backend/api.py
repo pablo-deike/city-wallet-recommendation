@@ -3,11 +3,29 @@ from fastapi import HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import math
+import uuid
 from datetime import datetime
 import os
 import json
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+
+from backend.rules import (
+    AutoRule,
+    AutoRuleCreate,
+    AutoRuleUpdate,
+    AutoRuleType,
+    SpecialOffer,
+    SpecialOfferCreate,
+    SpecialOfferUpdate,
+    AUTO_RULE_METADATA,
+    AUTO_RULE_DEFAULTS,
+    auto_rules_db,
+    special_offers_db,
+    get_merchant_auto_rules,
+    get_merchant_special_offers,
+    create_default_auto_rules,
+)
 
 app = FastAPI(title="Vico API")
 
@@ -517,4 +535,318 @@ def update_merchant_rules(merchant_id: str, body: UpdateRulesPayload):
             "quiet_threshold": body.quiet_threshold,
             "offer_duration": body.offer_duration,
         },
+    }
+
+
+# ── Auto Rules endpoints ──────────────────────────────────────────────────────
+
+@app.get("/merchant/{merchant_id}/auto-rules")
+def get_auto_rules(merchant_id: str):
+    print(f"\n[MERCHANT] get_auto_rules called")
+    print(f"  merchant_id : {merchant_id}")
+    
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    rules = get_merchant_auto_rules(merchant_id)
+    if not rules:
+        rules = create_default_auto_rules(merchant_id)
+    
+    rules_data = []
+    for rule in rules:
+        meta = AUTO_RULE_METADATA.get(rule.rule_type, {})
+        rules_data.append({
+            "rule_id": rule.rule_id,
+            "rule_type": rule.rule_type.value,
+            "name": meta.get("name", rule.rule_type.value),
+            "description": meta.get("description", ""),
+            "trigger_source": meta.get("trigger_source", "user_history").value,
+            "enabled": rule.enabled,
+            "discount_percent": rule.discount_percent,
+            "trigger_config": rule.trigger_config,
+            "created_at": rule.created_at.isoformat(),
+            "updated_at": rule.updated_at.isoformat(),
+        })
+    
+    print(f"  → returning {len(rules_data)} auto rules for {merchant_id}")
+    
+    return {
+        "merchant_id": merchant_id,
+        "rules": rules_data,
+    }
+
+
+@app.post("/merchant/{merchant_id}/auto-rules")
+def create_auto_rule(merchant_id: str, body: AutoRuleCreate):
+    print(f"\n[MERCHANT] create_auto_rule called")
+    print(f"  merchant_id     : {merchant_id}")
+    print(f"  rule_type       : {body.rule_type}")
+    print(f"  discount_percent: {body.discount_percent}")
+    
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    rule_id = f"auto_{merchant_id}_{body.rule_type.value}_{uuid.uuid4().hex[:8]}"
+    now = datetime.now()
+    
+    rule = AutoRule(
+        rule_id=rule_id,
+        merchant_id=merchant_id,
+        rule_type=body.rule_type,
+        enabled=body.enabled,
+        discount_percent=body.discount_percent,
+        trigger_config=body.trigger_config,
+        created_at=now,
+        updated_at=now,
+    )
+    
+    auto_rules_db[rule_id] = rule
+    
+    print(f"  → created rule {rule_id}")
+    
+    meta = AUTO_RULE_METADATA.get(rule.rule_type, {})
+    return {
+        "success": True,
+        "rule": {
+            "rule_id": rule_id,
+            "rule_type": rule.rule_type.value,
+            "name": meta.get("name", rule.rule_type.value),
+            "enabled": rule.enabled,
+            "discount_percent": rule.discount_percent,
+            "trigger_config": rule.trigger_config,
+        },
+    }
+
+
+@app.put("/merchant/{merchant_id}/auto-rules/{rule_id}")
+def update_auto_rule(merchant_id: str, rule_id: str, body: AutoRuleUpdate):
+    print(f"\n[MERCHANT] update_auto_rule called")
+    print(f"  merchant_id: {merchant_id}")
+    print(f"  rule_id    : {rule_id}")
+    
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    if rule_id not in auto_rules_db:
+        return {"error": f"Rule {rule_id} not found"}
+    
+    rule = auto_rules_db[rule_id]
+    if rule.merchant_id != merchant_id:
+        return {"error": f"Rule {rule_id} does not belong to merchant {merchant_id}"}
+    
+    if body.enabled is not None:
+        rule.enabled = body.enabled
+    if body.discount_percent is not None:
+        rule.discount_percent = body.discount_percent
+    if body.trigger_config is not None:
+        rule.trigger_config = body.trigger_config
+    
+    rule.updated_at = datetime.now()
+    
+    print(f"  → updated rule {rule_id}")
+    
+    return {
+        "success": True,
+        "rule": {
+            "rule_id": rule.rule_id,
+            "rule_type": rule.rule_type.value,
+            "enabled": rule.enabled,
+            "discount_percent": rule.discount_percent,
+            "trigger_config": rule.trigger_config,
+        },
+    }
+
+
+@app.delete("/merchant/{merchant_id}/auto-rules/{rule_id}")
+def delete_auto_rule(merchant_id: str, rule_id: str):
+    print(f"\n[MERCHANT] delete_auto_rule called")
+    print(f"  merchant_id: {merchant_id}")
+    print(f"  rule_id    : {rule_id}")
+    
+    if rule_id not in auto_rules_db:
+        return {"error": f"Rule {rule_id} not found"}
+    
+    rule = auto_rules_db[rule_id]
+    if rule.merchant_id != merchant_id:
+        return {"error": f"Rule {rule_id} does not belong to merchant {merchant_id}"}
+    
+    del auto_rules_db[rule_id]
+    
+    print(f"  → deleted rule {rule_id}")
+    
+    return {"success": True, "deleted": rule_id}
+
+
+# ── Special Offers endpoints ───────────────────────────────────────────────────
+
+@app.get("/merchant/{merchant_id}/special-offers")
+def get_special_offers(merchant_id: str):
+    print(f"\n[MERCHANT] get_special_offers called")
+    print(f"  merchant_id : {merchant_id}")
+    
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    offers = get_merchant_special_offers(merchant_id)
+    
+    offers_data = []
+    for offer in offers:
+        offers_data.append({
+            "offer_id": offer.offer_id,
+            "title": offer.title,
+            "description": offer.description,
+            "discount_percent": offer.discount_percent,
+            "product_category": offer.product_category,
+            "start_time": offer.start_time.isoformat() if offer.start_time else None,
+            "end_time": offer.end_time.isoformat() if offer.end_time else None,
+            "max_redemptions": offer.max_redemptions,
+            "redemptions_count": offer.redemptions_count,
+            "active": offer.active,
+            "created_at": offer.created_at.isoformat(),
+            "updated_at": offer.updated_at.isoformat(),
+        })
+    
+    print(f"  → returning {len(offers_data)} special offers for {merchant_id}")
+    
+    return {
+        "merchant_id": merchant_id,
+        "offers": offers_data,
+    }
+
+
+@app.post("/merchant/{merchant_id}/special-offers")
+def create_special_offer(merchant_id: str, body: SpecialOfferCreate):
+    print(f"\n[MERCHANT] create_special_offer called")
+    print(f"  merchant_id     : {merchant_id}")
+    print(f"  title           : {body.title}")
+    print(f"  discount_percent: {body.discount_percent}")
+    
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    offer_id = f"special_{merchant_id}_{uuid.uuid4().hex[:8]}"
+    now = datetime.now()
+    
+    offer = SpecialOffer(
+        offer_id=offer_id,
+        merchant_id=merchant_id,
+        title=body.title,
+        description=body.description,
+        discount_percent=body.discount_percent,
+        product_category=body.product_category,
+        start_time=body.start_time,
+        end_time=body.end_time,
+        max_redemptions=body.max_redemptions,
+        redemptions_count=0,
+        active=True,
+        created_at=now,
+        updated_at=now,
+    )
+    
+    special_offers_db[offer_id] = offer
+    
+    print(f"  → created special offer {offer_id}")
+    
+    return {
+        "success": True,
+        "offer": {
+            "offer_id": offer_id,
+            "title": offer.title,
+            "description": offer.description,
+            "discount_percent": offer.discount_percent,
+            "product_category": offer.product_category,
+            "active": offer.active,
+        },
+    }
+
+
+@app.put("/merchant/{merchant_id}/special-offers/{offer_id}")
+def update_special_offer(merchant_id: str, offer_id: str, body: SpecialOfferUpdate):
+    print(f"\n[MERCHANT] update_special_offer called")
+    print(f"  merchant_id: {merchant_id}")
+    print(f"  offer_id   : {offer_id}")
+    
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    if offer_id not in special_offers_db:
+        return {"error": f"Offer {offer_id} not found"}
+    
+    offer = special_offers_db[offer_id]
+    if offer.merchant_id != merchant_id:
+        return {"error": f"Offer {offer_id} does not belong to merchant {merchant_id}"}
+    
+    if body.title is not None:
+        offer.title = body.title
+    if body.description is not None:
+        offer.description = body.description
+    if body.discount_percent is not None:
+        offer.discount_percent = body.discount_percent
+    if body.product_category is not None:
+        offer.product_category = body.product_category
+    if body.start_time is not None:
+        offer.start_time = body.start_time
+    if body.end_time is not None:
+        offer.end_time = body.end_time
+    if body.max_redemptions is not None:
+        offer.max_redemptions = body.max_redemptions
+    if body.active is not None:
+        offer.active = body.active
+    
+    offer.updated_at = datetime.now()
+    
+    print(f"  → updated special offer {offer_id}")
+    
+    return {
+        "success": True,
+        "offer": {
+            "offer_id": offer.offer_id,
+            "title": offer.title,
+            "discount_percent": offer.discount_percent,
+            "active": offer.active,
+        },
+    }
+
+
+@app.delete("/merchant/{merchant_id}/special-offers/{offer_id}")
+def delete_special_offer(merchant_id: str, offer_id: str):
+    print(f"\n[MERCHANT] delete_special_offer called")
+    print(f"  merchant_id: {merchant_id}")
+    print(f"  offer_id   : {offer_id}")
+    
+    if offer_id not in special_offers_db:
+        return {"error": f"Offer {offer_id} not found"}
+    
+    offer = special_offers_db[offer_id]
+    if offer.merchant_id != merchant_id:
+        return {"error": f"Offer {offer_id} does not belong to merchant {merchant_id}"}
+    
+    del special_offers_db[offer_id]
+    
+    print(f"  → deleted special offer {offer_id}")
+    
+    return {"success": True, "deleted": offer_id}
+
+
+# ── Auto Rules Metadata endpoint ──────────────────────────────────────────────
+
+@app.get("/auto-rules/types")
+def get_auto_rule_types():
+    print(f"\n[AUTO_RULES] get_auto_rule_types called")
+    
+    types_data = []
+    for rule_type in AutoRuleType:
+        meta = AUTO_RULE_METADATA.get(rule_type, {})
+        defaults = AUTO_RULE_DEFAULTS.get(rule_type, {})
+        types_data.append({
+            "type": rule_type.value,
+            "name": meta.get("name", rule_type.value),
+            "description": meta.get("description", ""),
+            "trigger_source": meta.get("trigger_source", "user_history").value,
+            "default_discount_percent": defaults.get("discount_percent", 10),
+            "default_trigger_config": defaults.get("trigger_config", {}),
+        })
+    
+    return {
+        "rule_types": types_data,
     }

@@ -10,17 +10,17 @@ import vicoLogo from './images/vico-logo.svg'
 
 const MERCHANT_COORDS = {
   cafe_mueller: { lat: 52.5200, lon: 13.4050 },
-  pizza_place:  { lat: 52.5210, lon: 13.4060 },
+  pizza_place: { lat: 52.5210, lon: 13.4060 },
 }
 const DEFAULT_LOC = { lat: 52.5185, lon: 13.4010 }
-const BASE_PRICE  = 4.90
+const BASE_PRICE = 4.90
 
 
 // ── Small tappable map thumbnail ─────────────────────────────────────────────
 function MapThumb({ mapsUrl, mapsImageUrl, size = 56, radius = 10 }) {
   return (
     <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
-       style={{ display: 'block', width: size, height: size, borderRadius: radius, overflow: 'hidden', flexShrink: 0, border: '1px solid #dbe3ef' }}>
+      style={{ display: 'block', width: size, height: size, borderRadius: radius, overflow: 'hidden', flexShrink: 0, border: '1px solid #dbe3ef' }}>
       <img src={mapsImageUrl} alt="map" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
     </a>
   )
@@ -29,9 +29,9 @@ function MapThumb({ mapsUrl, mapsImageUrl, size = 56, radius = 10 }) {
 // ── Vanilla Leaflet map ───────────────────────────────────────────────────────
 function LeafletMap({ userLocation, cafeLocation }) {
   const containerRef = useRef(null)
-  const mapRef       = useRef(null)
-  const userMarker   = useRef(null)
-  const cafeMarker   = useRef(null)
+  const mapRef = useRef(null)
+  const userMarker = useRef(null)
+  const cafeMarker = useRef(null)
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
@@ -48,7 +48,7 @@ function LeafletMap({ userLocation, cafeLocation }) {
     if (!map || !userLocation) return
     const icon = L.divIcon({
       html: '<div style="position:relative;width:48px;height:48px"><div class="user-marker-dot"></div><div class="user-marker-pulse"></div></div>',
-      className: '', iconSize: [48,48], iconAnchor: [24,24],
+      className: '', iconSize: [48, 48], iconAnchor: [24, 24],
     })
     if (userMarker.current) userMarker.current.setLatLng([userLocation.lat, userLocation.lon])
     else userMarker.current = L.marker([userLocation.lat, userLocation.lon], { icon }).addTo(map)
@@ -59,10 +59,10 @@ function LeafletMap({ userLocation, cafeLocation }) {
     const map = mapRef.current
     if (!map) return
     if (cafeLocation) {
-      const icon = L.divIcon({ html: '<div class="cafe-marker"></div>', className: '', iconSize: [40,40], iconAnchor: [20,20] })
+      const icon = L.divIcon({ html: '<div class="cafe-marker"></div>', className: '', iconSize: [40, 40], iconAnchor: [20, 20] })
       if (cafeMarker.current) cafeMarker.current.setLatLng([cafeLocation.lat, cafeLocation.lon])
       else cafeMarker.current = L.marker([cafeLocation.lat, cafeLocation.lon], { icon }).addTo(map)
-      if (userLocation) map.fitBounds([[userLocation.lat, userLocation.lon],[cafeLocation.lat, cafeLocation.lon]], { padding: [80,80], animate: true })
+      if (userLocation) map.fitBounds([[userLocation.lat, userLocation.lon], [cafeLocation.lat, cafeLocation.lon]], { padding: [80, 80], animate: true })
     } else {
       if (cafeMarker.current) { cafeMarker.current.remove(); cafeMarker.current = null }
     }
@@ -99,29 +99,29 @@ function RoleSelect({ onSelect }) {
 
 // ── App (user view) ───────────────────────────────────────────────────────────
 export default function App() {
-  const [view,         setView]         = useState('select')
-  const [subTab,       setSubTab]       = useState('explore')
-  const [screen,       setScreen]       = useState('offer')
-  const [offer,        setOffer]        = useState(null)
-  const [qrData,       setQrData]       = useState(null)
+  const [view, setView] = useState('select')
+  const [subTab, setSubTab] = useState('explore')
+  const [screen, setScreen] = useState('offer')
+  const [offer, setOffer] = useState(null)
+  const [qrData, setQrData] = useState(null)
   const [userLocation, setUserLocation] = useState(null)
-  const [paying,       setPaying]       = useState(false)
-  const [history,      setHistory]      = useState([])
-  const [expandedQr,   setExpandedQr]   = useState(null)
+  const [paying, setPaying] = useState(false)
+  const [history, setHistory] = useState([])
+  const [expandedQr, setExpandedQr] = useState(null)
 
   const cafeLocation = offer?.merchant_id ? MERCHANT_COORDS[offer.merchant_id] ?? null : null
 
   // Parse discount % from strings like "15% off any hot drink"
   const discountPct = offer ? (parseInt(offer.discount) || 0) : 0
-  const savings     = parseFloat((BASE_PRICE * discountPct / 100).toFixed(2))
-  const youPay      = parseFloat((BASE_PRICE - savings).toFixed(2))
+  const savings = parseFloat((BASE_PRICE * discountPct / 100).toFixed(2))
+  const youPay = parseFloat((BASE_PRICE - savings).toFixed(2))
 
   useEffect(() => {
-    const fetchOffer = (lat, lon) => generateOffer(lat, lon).then(setOffer).catch(() => {})
+    const fetchOffer = (lat, lon) => generateOffer(lat, lon).then(setOffer).catch(() => { })
     if (!navigator.geolocation) { setUserLocation(DEFAULT_LOC); fetchOffer(DEFAULT_LOC.lat, DEFAULT_LOC.lon); return }
     navigator.geolocation.getCurrentPosition(
       pos => { const loc = { lat: pos.coords.latitude, lon: pos.coords.longitude }; setUserLocation(loc); fetchOffer(loc.lat, loc.lon) },
-      ()  => { setUserLocation(DEFAULT_LOC); fetchOffer(DEFAULT_LOC.lat, DEFAULT_LOC.lon) },
+      () => { setUserLocation(DEFAULT_LOC); fetchOffer(DEFAULT_LOC.lat, DEFAULT_LOC.lon) },
       { timeout: 8000, maximumAge: 60000 }
     )
   }, [])
@@ -140,7 +140,7 @@ export default function App() {
   }, [screen, offer])
 
   async function handleAccept() {
-    try { const data = await claimOffer(offer.offer_id); setQrData(data) } catch {}
+    try { const data = await claimOffer(offer.offer_id); setQrData(data) } catch { }
     setScreen('payment')
   }
 
@@ -159,14 +159,14 @@ export default function App() {
         date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         qrToken: qrData?.qr_token,
       }, ...prev])
-    } catch {}
+    } catch { }
     setPaying(false)
     setScreen('qr')
   }
 
-  async function handleReject() { dismissOffer(offer.offer_id).catch(() => {}); setScreen('dismissed') }
+  async function handleReject() { dismissOffer(offer.offer_id).catch(() => { }); setScreen('dismissed') }
 
-  if (view === 'select')   return <RoleSelect onSelect={setView} />
+  if (view === 'select') return <RoleSelect onSelect={setView} />
   if (view === 'merchant') return <MerchantView onBack={() => setView('select')} />
 
   return (
