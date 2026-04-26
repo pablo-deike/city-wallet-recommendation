@@ -1,8 +1,33 @@
 from fastapi import FastAPI
+from fastapi import HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+import math
+import uuid
+from datetime import datetime
+import os
+import json
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
-app = FastAPI(title="City Wallet API")
+from backend.rules import (
+    AutoRule,
+    AutoRuleCreate,
+    AutoRuleUpdate,
+    AutoRuleType,
+    SpecialOffer,
+    SpecialOfferCreate,
+    SpecialOfferUpdate,
+    AUTO_RULE_METADATA,
+    AUTO_RULE_DEFAULTS,
+    auto_rules_db,
+    special_offers_db,
+    get_merchant_auto_rules,
+    get_merchant_special_offers,
+    create_default_auto_rules,
+)
+
+app = FastAPI(title="Vico API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -27,6 +52,7 @@ class ClaimPayload(BaseModel):
 class RedeemPayload(BaseModel):
     user_id: str
     qr_token: str
+    purchase_amount: float = 10.0  # Default purchase amount
 
 class DismissPayload(BaseModel):
     user_id: str
@@ -38,28 +64,205 @@ class UpdateRulesPayload(BaseModel):
     offer_duration: int
 
 
+# ── Data stores ──────────────────────────────────────────────────────────────
+
+# Merchant database with locations and rules
+merchants_db = {
+    "cafe_mueller": {
+        "name": "Café Müller",
+        "lat": 52.5200,
+        "lon": 13.4050,
+        "offers": [
+            {"type": "cold_weather", "discount": "15% off any hot drink"},
+            {"type": "quiet_hours", "discount": "20% off pastry + drink"},
+        ],
+        "max_discount": 20,
+        "quiet_threshold": 5,
+        "offer_duration": 18,
+    },
+    "pizza_place": {
+        "name": "Pizzeria Napoli",
+        "lat": 52.5210,
+        "lon": 13.4060,
+        "offers": [
+            {"type": "quiet_hours", "discount": "10% off lunch special"},
+        ],
+        "max_discount": 15,
+        "quiet_threshold": 8,
+        "offer_duration": 20,
+    },
+}
+
+# Store active offers to retrieve correct merchant/discount on claim
+offers_store = {}
+
+# Track merchant statistics and rules
+merchant_stats = {}
+merchant_rules = {}
+
+# Track user wallets
+user_wallets = {}
+
+PUBLIC_API_BASE_URL = os.environ.get("PUBLIC_API_BASE_URL", "http://localhost:8000")
+
+
+# ── Google Maps place metadata (hardcoded for now) ──────────────────────────
+
+GOOGLE_PLACES_BY_MERCHANT = {
+    "cafe_mueller": {
+        "place_id": "ChIJN1t_tDeuEmsRUsoyG83frY4",
+    },
+    "pizza_place": {
+        "place_id": "ChIJP3Sa8ziYEmsRUKgyFmh9AQM",
+    },
+}
+
+
+def fetch_place_photo_reference(place_id: str, api_key: str) -> str | None:
+    try:
+        query = urlencode({
+            "place_id": place_id,
+            "fields": "photos",
+            "key": api_key,
+        })
+        details_url = f"https://maps.googleapis.com/maps/api/place/details/json?{query}"
+        with urlopen(details_url, timeout=4) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        photos = payload.get("result", {}).get("photos", [])
+        if photos:
+            return photos[0].get("photo_reference")
+    except Exception as exc:
+        print(f"WARNING: failed to fetch Google Place photo reference: {exc}")
+    return None
+
+
+def build_google_maps_source_image_url(merchant_id: str, lat: float, lon: float) -> str:
+    place_meta = GOOGLE_PLACES_BY_MERCHANT.get(merchant_id)
+    api_key = os.environ.get("GOOGLE_PLACES_WEATHER_API_KEY") or os.environ.get("GOOGLE_MAPS_API_KEY")
+
+    # Prefer official Google Place Photo endpoint when key + place photo are available
+    photo_reference = None
+    if api_key and place_meta and place_meta.get("place_id"):
+        photo_reference = fetch_place_photo_reference(place_meta["place_id"], api_key)
+
+    if api_key and photo_reference:
+        maps_image_url = (
+            "https://maps.googleapis.com/maps/api/place/photo"
+            f"?maxwidth=800&photo_reference={photo_reference}&key={api_key}"
+        )
+    else:
+        if not api_key:
+            print("WARNING: GOOGLE_PLACES_WEATHER_API_KEY / GOOGLE_MAPS_API_KEY not set. Falling back to static map image.")
+        return (
+            "https://maps.googleapis.com/maps/api/staticmap"
+            f"?center={lat},{lon}&zoom=15&size=400x200&markers=color:red%7C{lat},{lon}&key={api_key or ''}"
+        )
+
+    return maps_image_url
+
+
+def build_google_maps_assets(merchant_id: str, lat: float, lon: float) -> tuple[str, str]:
+    place_meta = GOOGLE_PLACES_BY_MERCHANT.get(merchant_id)
+
+    if place_meta and place_meta.get("place_id"):
+        place_id = place_meta["place_id"]
+        maps_url = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}&query_place_id={place_id}"
+    else:
+        maps_url = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
+
+    maps_image_url = f"{PUBLIC_API_BASE_URL}/maps/place-image/{merchant_id}?lat={lat}&lon={lon}"
+
+    return maps_url, maps_image_url
+
+
+@app.get("/maps/place-image/{merchant_id}")
+def get_place_image(merchant_id: str, lat: float, lon: float):
+    image_source_url = build_google_maps_source_image_url(merchant_id, lat, lon)
+
+    try:
+        request = Request(
+            image_source_url,
+            headers={"User-Agent": "Mozilla/5.0"},
+        )
+        with urlopen(request, timeout=8) as response:
+            image_bytes = response.read()
+            content_type = response.info().get_content_type() or "image/jpeg"
+            return Response(content=image_bytes, media_type=content_type)
+    except Exception as exc:
+        print(f"ERROR: failed to fetch place image for {merchant_id}: {exc}")
+        raise HTTPException(status_code=502, detail="Unable to load place image")
+
+
 # ── Offer endpoints ───────────────────────────────────────────────────────────
 
 @app.post("/offers/generate")
 def generate_offer(ctx: ContextPayload):
+    
     print(f"\n[OFFERS] generate_offer called")
     print(f"  user_id     : {ctx.user_id}")
     print(f"  location    : ({ctx.lat}, {ctx.lon})")
     print(f"  weather     : {ctx.weather}, {ctx.temperature}°C")
     print(f"  → running AI offer engine...")
-    print(f"  → nearest merchant: Café Müller (80m)")
-    print(f"  → trigger: quiet hours + cold weather match")
-    print(f"  → generated: 15% off any hot drink, valid 18 min")
-    return {
-        "offer_id": "offer_001",
-        "merchant": "Café Müller",
-        "distance_m": 80,
-        "headline": "Cold outside? Your cappuccino is waiting.",
-        "discount": "15% off any hot drink",
-        "reason": "Quiet right now — offer valid for 18 minutes",
-        "valid_minutes": 18,
-        "emoji": "☕",
+    
+    # Find nearest merchant based on user location
+    nearest_merchant = None
+    min_distance = float('inf')
+    
+    for merchant_id, merchant in merchants_db.items():
+        # Calculate distance using Haversine formula (simplified)
+        distance = math.sqrt((merchant["lat"] - ctx.lat)**2 + (merchant["lon"] - ctx.lon)**2) * 111  # km to meters
+        if distance < min_distance:
+            min_distance = distance
+            nearest_merchant = (merchant_id, merchant, distance)
+    
+    if not nearest_merchant:
+        return {"error": "No merchants available"}
+    
+    merchant_id, merchant, distance_m = nearest_merchant
+    print(f"  → nearest merchant: {merchant['name']} ({distance_m:.0f}m)")
+    
+    # Select offer based on context (weather, time, etc.)
+    offer_config = None
+    trigger_reason = ""
+    
+    if ctx.temperature < 5 and ctx.weather in ["cloudy", "rainy", "snowy"]:
+        offer_config = merchant["offers"][0]  # Cold weather offer
+        trigger_reason = "cold weather match"
+    else:
+        offer_config = merchant["offers"][0]  # Default to first offer
+        trigger_reason = "personalized recommendation"
+    
+    print(f"  → trigger: {trigger_reason}")
+    print(f"  → generated: {offer_config['discount']}, valid {merchant['offer_duration']} min")
+    
+    # Generate unique offer ID
+    offer_id = f"offer_{datetime.now().timestamp()}_{ctx.user_id[:4]}"
+    
+    # Create offer data
+    lat, lon = merchant["lat"], merchant["lon"]
+    
+    google_maps_url, google_maps_image_url = build_google_maps_assets(merchant_id, lat, lon)
+
+    # Create offer data
+    offer_data = {
+        "offer_id": offer_id,
+        "merchant_id": merchant_id,
+        "merchant": merchant["name"],
+        "distance_m": int(distance_m),
+        "headline": f"{merchant['name']} is offering...",
+        "discount": offer_config["discount"],
+        "reason": f"Quiet right now — offer valid for {merchant['offer_duration']} minutes",
+        "valid_minutes": merchant['offer_duration'],
+        
+        "maps_url": google_maps_url,
+        "maps_image_url": google_maps_image_url,
+        
+        "created_at": datetime.now().isoformat(),
     }
+    # Store the offer so claim can retrieve it
+    offers_store[offer_id] = offer_data
+    
+    return offer_data
 
 
 @app.post("/offers/{offer_id}/claim")
@@ -67,14 +270,20 @@ def claim_offer(offer_id: str, body: ClaimPayload):
     print(f"\n[OFFERS] claim_offer called")
     print(f"  offer_id : {offer_id}")
     print(f"  user_id  : {body.user_id}")
+    
+    # Look up the stored offer to get correct merchant and discount
+    offer = offers_store.get(offer_id)
+    if not offer:
+        return {"error": "Offer not found or expired"}
+    
     print(f"  → generating QR token...")
     print(f"  → QR token: QR-{offer_id.upper()}-{body.user_id.upper()[:6]}")
-    print(f"  → offer locked to user, countdown started (17:43)")
+    print(f"  → offer locked to user, countdown started (2:00)")
     return {
         "qr_token": f"QR-{offer_id.upper()}-{body.user_id.upper()[:6]}",
-        "expires_in_seconds": 1063,
-        "merchant": "Café Müller",
-        "discount": "15% off",
+        "expires_in_seconds": 120,
+        "merchant": offer["merchant"], 
+        "discount": offer["discount"],  
     }
 
 
@@ -84,16 +293,65 @@ def redeem_offer(offer_id: str, body: RedeemPayload):
     print(f"  offer_id  : {offer_id}")
     print(f"  user_id   : {body.user_id}")
     print(f"  qr_token  : {body.qr_token}")
+    print(f"  purchase_amount: €{body.purchase_amount:.2f}")
+    
+    # Validate QR token format
+    if not body.qr_token.startswith("QR-"):
+        return {"error": "Invalid QR token format"}
+    
+    # Look up the offer
+    offer = offers_store.get(offer_id)
+    if not offer:
+        return {"error": "Offer not found or expired"}
+    
     print(f"  → validating QR token... ✓")
     print(f"  → marking offer as redeemed")
-    print(f"  → calculating cashback: 15% of €3.00 = €0.45")
-    print(f"  → crediting €0.45 to wallet of {body.user_id}")
-    print(f"  → new wallet balance: €2.85")
+    
+    # Extract discount percentage from discount string (e.g., "15% off any hot drink" → 15)
+    discount_str = offer.get("discount", "0% off")
+    try:
+        discount_percent = int(discount_str.split("%")[0])
+    except (ValueError, IndexError):
+        discount_percent = 0
+    
+    # Calculate cashback
+    cashback_earned = (body.purchase_amount * discount_percent) / 100
+    
+    print(f"  → calculating cashback: {discount_percent}% of €{body.purchase_amount:.2f} = €{cashback_earned:.2f}")
+    
+    # Get or initialize user wallet
+    if body.user_id not in user_wallets:
+        user_wallets[body.user_id] = 0.0
+    
+    old_balance = user_wallets[body.user_id]
+    new_balance = old_balance + cashback_earned
+    user_wallets[body.user_id] = new_balance
+    
+    print(f"  → crediting €{cashback_earned:.2f} to wallet of {body.user_id}")
+    print(f"  → old balance: €{old_balance:.2f} → new balance: €{new_balance:.2f}")
+    
+    # Update merchant stats
+    merchant_id = offer.get("merchant_id")
+    if merchant_id not in merchant_stats:
+        merchant_stats[merchant_id] = {
+            "offers_sent": 0,
+            "offers_accepted": 0,
+            "cashback_issued": 0.0,
+        }
+    
+    merchant_stats[merchant_id]["offers_accepted"] += 1
+    merchant_stats[merchant_id]["cashback_issued"] += cashback_earned
+    
     return {
         "success": True,
-        "cashback_earned": 0.45,
-        "new_balance": 2.85,
-        "message": "Cashback of €0.45 added to your wallet",
+        "offer_id": offer_id,
+        "merchant": offer.get("merchant"),
+        "discount": offer.get("discount"),
+        "purchase_amount": body.purchase_amount,
+        "cashback_earned": round(cashback_earned, 2),
+        "old_balance": round(old_balance, 2),
+        "new_balance": round(new_balance, 2),
+        "message": f"Cashback of €{cashback_earned:.2f} added to your wallet",
     }
 
 
@@ -108,20 +366,62 @@ def dismiss_offer(offer_id: str, body: DismissPayload):
     return {"message": "Got it — we'll find a better moment"}
 
 
+# ── User endpoints ────────────────────────────────────────────────────────────
+
+@app.get("/user/{user_id}/wallet")
+def get_user_wallet(user_id: str):
+    print(f"\n[USER] get_wallet called")
+    print(f"  user_id : {user_id}")
+    
+    # Get or initialize wallet
+    if user_id not in user_wallets:
+        user_wallets[user_id] = 0.0
+    
+    balance = user_wallets[user_id]
+    print(f"  → wallet balance: €{balance:.2f}")
+    
+    return {
+        "user_id": user_id,
+        "balance": round(balance, 2),
+        "currency": "EUR",
+    }
+
+
 # ── Merchant endpoints ────────────────────────────────────────────────────────
 
 @app.get("/merchant/{merchant_id}/stats")
 def get_merchant_stats(merchant_id: str):
     print(f"\n[MERCHANT] get_stats called")
     print(f"  merchant_id : {merchant_id}")
-    print(f"  → querying offers sent today: 12")
-    print(f"  → computing accept rate: 8/12 = 67%")
-    print(f"  → summing cashback issued: €5.40")
+    
+    # Verify merchant exists
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    merchant = merchants_db[merchant_id]
+    
+    # Get or initialize stats for this merchant
+    if merchant_id not in merchant_stats:
+        merchant_stats[merchant_id] = {
+            "offers_sent": 0,
+            "offers_accepted": 0,
+            "cashback_issued": 0.0,
+        }
+    
+    stats = merchant_stats[merchant_id]
+    accept_rate = stats["offers_accepted"] / stats["offers_sent"] if stats["offers_sent"] > 0 else 0
+    
+    print(f"  → querying offers sent today: {stats['offers_sent']}")
+    print(f"  → computing accept rate: {stats['offers_accepted']}/{stats['offers_sent']} = {accept_rate*100:.0f}%")
+    print(f"  → summing cashback issued: €{stats['cashback_issued']:.2f}")
+    
     return {
         "merchant_id": merchant_id,
-        "offers_sent_today": 12,
-        "accept_rate": 0.67,
-        "cashback_issued": 5.40,
+        "merchant_name": merchant["name"],
+        "offers_sent_today": stats["offers_sent"],
+        "offers_accepted": stats["offers_accepted"],
+        "accept_rate": accept_rate,
+        "cashback_issued": stats["cashback_issued"],
     }
 
 
@@ -129,16 +429,32 @@ def get_merchant_stats(merchant_id: str):
 def get_offer_feed(merchant_id: str):
     print(f"\n[MERCHANT] get_offer_feed called")
     print(f"  merchant_id : {merchant_id}")
-    print(f"  → fetching last 5 generated offers")
+    
+    # Verify merchant exists
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    # Get actual offers generated for this merchant
+    merchant_offers = []
+    for offer_id, offer in offers_store.items():
+        if offer.get("merchant_id") == merchant_id:
+            # Determine status based on whether it's claimed
+            status = "Generated"  # Could be enhanced with actual tracking
+            merchant_offers.append({
+                "offer_id": offer_id,
+                "time": offer.get("created_at", ""),
+                "offer": offer.get("discount", ""),
+                "status": status,
+                "distance": f"{offer.get('distance_m', 0)}m",
+            })
+    
+    # If no offers yet, show empty
+    print(f"  → fetching last 5 generated offers for {merchant_id}")
+    
     return {
         "merchant_id": merchant_id,
-        "offers": [
-            {"time": "12:41", "offer": "15% off any hot drink",  "status": "Accepted", "distance": "80m"},
-            {"time": "12:38", "offer": "10% off lunch special",  "status": "Declined", "distance": "150m"},
-            {"time": "12:35", "offer": "20% off pastry + drink", "status": "Accepted", "distance": "45m"},
-            {"time": "12:29", "offer": "15% off any hot drink",  "status": "Pending",  "distance": "120m"},
-            {"time": "12:22", "offer": "10% off any purchase",   "status": "Accepted", "distance": "60m"},
-        ],
+        "total_offers": len(merchant_offers),
+        "offers": merchant_offers[-5:] if merchant_offers else [],  # Last 5
     }
 
 
@@ -146,12 +462,30 @@ def get_offer_feed(merchant_id: str):
 def get_merchant_rules(merchant_id: str):
     print(f"\n[MERCHANT] get_rules called")
     print(f"  merchant_id : {merchant_id}")
-    print(f"  → loading active rule config")
+    
+    # Verify merchant exists
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    merchant = merchants_db[merchant_id]
+    
+    # Get current rules (or use defaults from merchants_db)
+    if merchant_id not in merchant_rules:
+        merchant_rules[merchant_id] = {
+            "max_discount": merchant["max_discount"],
+            "quiet_threshold": merchant["quiet_threshold"],
+            "offer_duration": merchant["offer_duration"],
+        }
+    
+    rules = merchant_rules[merchant_id]
+    print(f"  → loading active rule config for {merchant['name']}")
+    
     return {
         "merchant_id": merchant_id,
-        "max_discount": 20,
-        "quiet_threshold": 5,
-        "offer_duration": 18,
+        "merchant_name": merchant["name"],
+        "max_discount": rules["max_discount"],
+        "quiet_threshold": rules["quiet_threshold"],
+        "offer_duration": rules["offer_duration"],
         "goal": "fill seats during quiet periods",
     }
 
@@ -163,9 +497,36 @@ def update_merchant_rules(merchant_id: str, body: UpdateRulesPayload):
     print(f"  max_discount    : {body.max_discount}%")
     print(f"  quiet_threshold : {body.quiet_threshold} customers/hr")
     print(f"  offer_duration  : {body.offer_duration} minutes")
+    
+    # Verify merchant exists
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    # Validate constraints
+    if body.max_discount < 0 or body.max_discount > 100:
+        return {"error": "max_discount must be between 0 and 100"}
+    if body.quiet_threshold < 0:
+        return {"error": "quiet_threshold cannot be negative"}
+    if body.offer_duration < 1:
+        return {"error": "offer_duration must be at least 1 minute"}
+    
     print(f"  → validating rule constraints... ✓")
+    
+    # Save the new rules
+    merchant_rules[merchant_id] = {
+        "max_discount": body.max_discount,
+        "quiet_threshold": body.quiet_threshold,
+        "offer_duration": body.offer_duration,
+    }
+    
+    # Update the merchants_db as well for future offers
+    merchants_db[merchant_id]["max_discount"] = body.max_discount
+    merchants_db[merchant_id]["quiet_threshold"] = body.quiet_threshold
+    merchants_db[merchant_id]["offer_duration"] = body.offer_duration
+    
     print(f"  → saving new rule config")
     print(f"  → AI engine will use updated rules on next trigger")
+    
     return {
         "success": True,
         "merchant_id": merchant_id,
@@ -174,4 +535,318 @@ def update_merchant_rules(merchant_id: str, body: UpdateRulesPayload):
             "quiet_threshold": body.quiet_threshold,
             "offer_duration": body.offer_duration,
         },
+    }
+
+
+# ── Auto Rules endpoints ──────────────────────────────────────────────────────
+
+@app.get("/merchant/{merchant_id}/auto-rules")
+def get_auto_rules(merchant_id: str):
+    print(f"\n[MERCHANT] get_auto_rules called")
+    print(f"  merchant_id : {merchant_id}")
+    
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    rules = get_merchant_auto_rules(merchant_id)
+    if not rules:
+        rules = create_default_auto_rules(merchant_id)
+    
+    rules_data = []
+    for rule in rules:
+        meta = AUTO_RULE_METADATA.get(rule.rule_type, {})
+        rules_data.append({
+            "rule_id": rule.rule_id,
+            "rule_type": rule.rule_type.value,
+            "name": meta.get("name", rule.rule_type.value),
+            "description": meta.get("description", ""),
+            "trigger_source": meta.get("trigger_source", "user_history").value,
+            "enabled": rule.enabled,
+            "discount_percent": rule.discount_percent,
+            "trigger_config": rule.trigger_config,
+            "created_at": rule.created_at.isoformat(),
+            "updated_at": rule.updated_at.isoformat(),
+        })
+    
+    print(f"  → returning {len(rules_data)} auto rules for {merchant_id}")
+    
+    return {
+        "merchant_id": merchant_id,
+        "rules": rules_data,
+    }
+
+
+@app.post("/merchant/{merchant_id}/auto-rules")
+def create_auto_rule(merchant_id: str, body: AutoRuleCreate):
+    print(f"\n[MERCHANT] create_auto_rule called")
+    print(f"  merchant_id     : {merchant_id}")
+    print(f"  rule_type       : {body.rule_type}")
+    print(f"  discount_percent: {body.discount_percent}")
+    
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    rule_id = f"auto_{merchant_id}_{body.rule_type.value}_{uuid.uuid4().hex[:8]}"
+    now = datetime.now()
+    
+    rule = AutoRule(
+        rule_id=rule_id,
+        merchant_id=merchant_id,
+        rule_type=body.rule_type,
+        enabled=body.enabled,
+        discount_percent=body.discount_percent,
+        trigger_config=body.trigger_config,
+        created_at=now,
+        updated_at=now,
+    )
+    
+    auto_rules_db[rule_id] = rule
+    
+    print(f"  → created rule {rule_id}")
+    
+    meta = AUTO_RULE_METADATA.get(rule.rule_type, {})
+    return {
+        "success": True,
+        "rule": {
+            "rule_id": rule_id,
+            "rule_type": rule.rule_type.value,
+            "name": meta.get("name", rule.rule_type.value),
+            "enabled": rule.enabled,
+            "discount_percent": rule.discount_percent,
+            "trigger_config": rule.trigger_config,
+        },
+    }
+
+
+@app.put("/merchant/{merchant_id}/auto-rules/{rule_id}")
+def update_auto_rule(merchant_id: str, rule_id: str, body: AutoRuleUpdate):
+    print(f"\n[MERCHANT] update_auto_rule called")
+    print(f"  merchant_id: {merchant_id}")
+    print(f"  rule_id    : {rule_id}")
+    
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    if rule_id not in auto_rules_db:
+        return {"error": f"Rule {rule_id} not found"}
+    
+    rule = auto_rules_db[rule_id]
+    if rule.merchant_id != merchant_id:
+        return {"error": f"Rule {rule_id} does not belong to merchant {merchant_id}"}
+    
+    if body.enabled is not None:
+        rule.enabled = body.enabled
+    if body.discount_percent is not None:
+        rule.discount_percent = body.discount_percent
+    if body.trigger_config is not None:
+        rule.trigger_config = body.trigger_config
+    
+    rule.updated_at = datetime.now()
+    
+    print(f"  → updated rule {rule_id}")
+    
+    return {
+        "success": True,
+        "rule": {
+            "rule_id": rule.rule_id,
+            "rule_type": rule.rule_type.value,
+            "enabled": rule.enabled,
+            "discount_percent": rule.discount_percent,
+            "trigger_config": rule.trigger_config,
+        },
+    }
+
+
+@app.delete("/merchant/{merchant_id}/auto-rules/{rule_id}")
+def delete_auto_rule(merchant_id: str, rule_id: str):
+    print(f"\n[MERCHANT] delete_auto_rule called")
+    print(f"  merchant_id: {merchant_id}")
+    print(f"  rule_id    : {rule_id}")
+    
+    if rule_id not in auto_rules_db:
+        return {"error": f"Rule {rule_id} not found"}
+    
+    rule = auto_rules_db[rule_id]
+    if rule.merchant_id != merchant_id:
+        return {"error": f"Rule {rule_id} does not belong to merchant {merchant_id}"}
+    
+    del auto_rules_db[rule_id]
+    
+    print(f"  → deleted rule {rule_id}")
+    
+    return {"success": True, "deleted": rule_id}
+
+
+# ── Special Offers endpoints ───────────────────────────────────────────────────
+
+@app.get("/merchant/{merchant_id}/special-offers")
+def get_special_offers(merchant_id: str):
+    print(f"\n[MERCHANT] get_special_offers called")
+    print(f"  merchant_id : {merchant_id}")
+    
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    offers = get_merchant_special_offers(merchant_id)
+    
+    offers_data = []
+    for offer in offers:
+        offers_data.append({
+            "offer_id": offer.offer_id,
+            "title": offer.title,
+            "description": offer.description,
+            "discount_percent": offer.discount_percent,
+            "product_category": offer.product_category,
+            "start_time": offer.start_time.isoformat() if offer.start_time else None,
+            "end_time": offer.end_time.isoformat() if offer.end_time else None,
+            "max_redemptions": offer.max_redemptions,
+            "redemptions_count": offer.redemptions_count,
+            "active": offer.active,
+            "created_at": offer.created_at.isoformat(),
+            "updated_at": offer.updated_at.isoformat(),
+        })
+    
+    print(f"  → returning {len(offers_data)} special offers for {merchant_id}")
+    
+    return {
+        "merchant_id": merchant_id,
+        "offers": offers_data,
+    }
+
+
+@app.post("/merchant/{merchant_id}/special-offers")
+def create_special_offer(merchant_id: str, body: SpecialOfferCreate):
+    print(f"\n[MERCHANT] create_special_offer called")
+    print(f"  merchant_id     : {merchant_id}")
+    print(f"  title           : {body.title}")
+    print(f"  discount_percent: {body.discount_percent}")
+    
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    offer_id = f"special_{merchant_id}_{uuid.uuid4().hex[:8]}"
+    now = datetime.now()
+    
+    offer = SpecialOffer(
+        offer_id=offer_id,
+        merchant_id=merchant_id,
+        title=body.title,
+        description=body.description,
+        discount_percent=body.discount_percent,
+        product_category=body.product_category,
+        start_time=body.start_time,
+        end_time=body.end_time,
+        max_redemptions=body.max_redemptions,
+        redemptions_count=0,
+        active=True,
+        created_at=now,
+        updated_at=now,
+    )
+    
+    special_offers_db[offer_id] = offer
+    
+    print(f"  → created special offer {offer_id}")
+    
+    return {
+        "success": True,
+        "offer": {
+            "offer_id": offer_id,
+            "title": offer.title,
+            "description": offer.description,
+            "discount_percent": offer.discount_percent,
+            "product_category": offer.product_category,
+            "active": offer.active,
+        },
+    }
+
+
+@app.put("/merchant/{merchant_id}/special-offers/{offer_id}")
+def update_special_offer(merchant_id: str, offer_id: str, body: SpecialOfferUpdate):
+    print(f"\n[MERCHANT] update_special_offer called")
+    print(f"  merchant_id: {merchant_id}")
+    print(f"  offer_id   : {offer_id}")
+    
+    if merchant_id not in merchants_db:
+        return {"error": f"Merchant {merchant_id} not found"}
+    
+    if offer_id not in special_offers_db:
+        return {"error": f"Offer {offer_id} not found"}
+    
+    offer = special_offers_db[offer_id]
+    if offer.merchant_id != merchant_id:
+        return {"error": f"Offer {offer_id} does not belong to merchant {merchant_id}"}
+    
+    if body.title is not None:
+        offer.title = body.title
+    if body.description is not None:
+        offer.description = body.description
+    if body.discount_percent is not None:
+        offer.discount_percent = body.discount_percent
+    if body.product_category is not None:
+        offer.product_category = body.product_category
+    if body.start_time is not None:
+        offer.start_time = body.start_time
+    if body.end_time is not None:
+        offer.end_time = body.end_time
+    if body.max_redemptions is not None:
+        offer.max_redemptions = body.max_redemptions
+    if body.active is not None:
+        offer.active = body.active
+    
+    offer.updated_at = datetime.now()
+    
+    print(f"  → updated special offer {offer_id}")
+    
+    return {
+        "success": True,
+        "offer": {
+            "offer_id": offer.offer_id,
+            "title": offer.title,
+            "discount_percent": offer.discount_percent,
+            "active": offer.active,
+        },
+    }
+
+
+@app.delete("/merchant/{merchant_id}/special-offers/{offer_id}")
+def delete_special_offer(merchant_id: str, offer_id: str):
+    print(f"\n[MERCHANT] delete_special_offer called")
+    print(f"  merchant_id: {merchant_id}")
+    print(f"  offer_id   : {offer_id}")
+    
+    if offer_id not in special_offers_db:
+        return {"error": f"Offer {offer_id} not found"}
+    
+    offer = special_offers_db[offer_id]
+    if offer.merchant_id != merchant_id:
+        return {"error": f"Offer {offer_id} does not belong to merchant {merchant_id}"}
+    
+    del special_offers_db[offer_id]
+    
+    print(f"  → deleted special offer {offer_id}")
+    
+    return {"success": True, "deleted": offer_id}
+
+
+# ── Auto Rules Metadata endpoint ──────────────────────────────────────────────
+
+@app.get("/auto-rules/types")
+def get_auto_rule_types():
+    print(f"\n[AUTO_RULES] get_auto_rule_types called")
+    
+    types_data = []
+    for rule_type in AutoRuleType:
+        meta = AUTO_RULE_METADATA.get(rule_type, {})
+        defaults = AUTO_RULE_DEFAULTS.get(rule_type, {})
+        types_data.append({
+            "type": rule_type.value,
+            "name": meta.get("name", rule_type.value),
+            "description": meta.get("description", ""),
+            "trigger_source": meta.get("trigger_source", "user_history").value,
+            "default_discount_percent": defaults.get("discount_percent", 10),
+            "default_trigger_config": defaults.get("trigger_config", {}),
+        })
+    
+    return {
+        "rule_types": types_data,
     }

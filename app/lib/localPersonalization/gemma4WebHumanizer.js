@@ -1,4 +1,3 @@
-import { FilesetResolver, LlmInference } from '@mediapipe/tasks-genai'
 import { boundEmoji, boundHeadline, boundReason } from './sanitize'
 
 export const GEMMA_4_E2B_IT_WEB_MODEL_PATH = '/models/gemma-4-E2B-it-web.task'
@@ -50,13 +49,19 @@ function buildPrompt(rawOffer, localContext) {
 }
 
 function buildPassThrough(rawOffer) {
-  return {
+  const passThrough = {
     merchant: rawOffer?.merchant,
     distance_m: rawOffer?.distance_m,
     discount: rawOffer?.discount,
     valid_minutes: rawOffer?.valid_minutes,
     offer_id: rawOffer?.offer_id,
   }
+
+  if (rawOffer?.merchant_id != null) {
+    passThrough.merchant_id = rawOffer.merchant_id
+  }
+
+  return passThrough
 }
 
 function buildResult(rawOffer, displayFields, metadata) {
@@ -113,6 +118,7 @@ export async function loadGemma4WebHumanizer(options = {}) {
     return buildUnavailableShell()
   }
 
+  const { FilesetResolver, LlmInference } = await import('@mediapipe/tasks-genai')
   const genai = await FilesetResolver.forGenAiTasks(wasmBasePath)
   const llm = await LlmInference.createFromModelPath(genai, modelAssetPath)
 

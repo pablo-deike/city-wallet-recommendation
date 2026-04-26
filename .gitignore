@@ -5,11 +5,6 @@ node_modules/
 dist/
 dist-ssr/
 
-# Local browser model artifacts
-app/public/models/*.task
-app/public/models/*.litertlm
-!app/public/models/README.md
-
 # Vite
 .vite/
 
@@ -63,3 +58,4 @@ coverage/
 tmp/
 package.json
 package-lock.json
+app/public/models/*.task

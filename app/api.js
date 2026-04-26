@@ -1,7 +1,7 @@
 const BASE = 'http://localhost:8000'
 
 const USER_ID     = 'user_mia'
-const MERCHANT_ID = 'cafe_muller'
+const MERCHANT_ID = 'cafe_mueller'
 
 async function post(path, body) {
   const res = await fetch(`${BASE}${path}`, {
@@ -26,11 +26,16 @@ async function put(path, body) {
   return res.json()
 }
 
-export function generateOffer() {
+async function del(path) {
+  const res = await fetch(`${BASE}${path}`, { method: 'DELETE' })
+  return res.json()
+}
+
+export function generateOffer(lat, lon) {
   return post('/offers/generate', {
     user_id:     USER_ID,
-    lat:         48.7758,
-    lon:         9.1829,
+    lat,
+    lon,
     weather:     'overcast',
     temperature: 11,
   })
@@ -40,8 +45,12 @@ export function claimOffer(offerId) {
   return post(`/offers/${offerId}/claim`, { user_id: USER_ID })
 }
 
-export function redeemOffer(offerId, qrToken) {
-  return post(`/offers/${offerId}/redeem`, { user_id: USER_ID, qr_token: qrToken })
+export function redeemOffer(offerId, qrToken, purchaseAmount = 10.0) {
+  return post(`/offers/${offerId}/redeem`, { user_id: USER_ID, qr_token: qrToken, purchase_amount: purchaseAmount })
+}
+
+export function getUserWallet() {
+  return get(`/user/${USER_ID}/wallet`)
 }
 
 export function dismissOffer(offerId, reason = null) {
@@ -62,4 +71,42 @@ export function getMerchantRules() {
 
 export function updateMerchantRules(rules) {
   return put(`/merchant/${MERCHANT_ID}/rules`, rules)
+}
+
+// Auto Rules API
+export function getAutoRules() {
+  return get(`/merchant/${MERCHANT_ID}/auto-rules`)
+}
+
+export function createAutoRule(rule) {
+  return post(`/merchant/${MERCHANT_ID}/auto-rules`, rule)
+}
+
+export function updateAutoRule(ruleId, updates) {
+  return put(`/merchant/${MERCHANT_ID}/auto-rules/${ruleId}`, updates)
+}
+
+export function deleteAutoRule(ruleId) {
+  return del(`/merchant/${MERCHANT_ID}/auto-rules/${ruleId}`)
+}
+
+export function getAutoRuleTypes() {
+  return get('/auto-rules/types')
+}
+
+// Special Offers API
+export function getSpecialOffers() {
+  return get(`/merchant/${MERCHANT_ID}/special-offers`)
+}
+
+export function createSpecialOffer(offer) {
+  return post(`/merchant/${MERCHANT_ID}/special-offers`, offer)
+}
+
+export function updateSpecialOffer(offerId, updates) {
+  return put(`/merchant/${MERCHANT_ID}/special-offers/${offerId}`, updates)
+}
+
+export function deleteSpecialOffer(offerId) {
+  return del(`/merchant/${MERCHANT_ID}/special-offers/${offerId}`)
 }

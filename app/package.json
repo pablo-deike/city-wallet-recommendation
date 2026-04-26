@@ -6,19 +6,22 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "pull:gemma4:e4b": "node scripts/pull-gemma4-e4b.mjs",
     "test": "node scripts/run-vitest.mjs",
     "test:run": "node scripts/run-vitest.mjs run"
   },
   "dependencies": {
     "@mediapipe/tasks-genai": "^0.10.27",
+    "leaflet": "^1.9.4",
+    "lucide-react": "^1.11.0",
+    "motion": "^12.38.0",
+    "qrcode.react": "^4.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.4",
     "jsdom": "^25.0.0",
-    "vite": "^6.3.2",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "vite": "^6.3.2"
   }
 }
