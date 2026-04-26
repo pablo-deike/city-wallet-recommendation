@@ -4,7 +4,7 @@ from pydantic import BaseModel
 import math
 from datetime import datetime
 
-app = FastAPI(title="City Wallet API")
+app = FastAPI(title="Vico API")
 
 app.add_middleware(
     CORSMiddleware,

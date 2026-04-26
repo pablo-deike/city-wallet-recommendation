@@ -44,7 +44,7 @@ export default function MerchantView({ onBack }) {
           <div style={{ color: '#6b7280', fontSize: 11, fontWeight: 600, letterSpacing: '1px' }}>MERCHANT DASHBOARD</div>
           <button onClick={onBack} style={{ background: '#ffffff', border: `1px solid ${C.border}`, borderRadius: 20, padding: '4px 12px', fontSize: 12, fontWeight: 600, color: '#374151', cursor: 'pointer' }}>← Back</button>
         </div>
-        <div style={{ color: '#111827', fontSize: 22, fontWeight: 800, letterSpacing: '-0.4px' }}>Café Müller ☕</div>
+        <div style={{ color: '#111827', fontSize: 22, fontWeight: 800, letterSpacing: '-0.4px' }}>Café Müller</div>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 10, background: 'rgba(16,185,129,0.12)', border: '1px solid rgba(16,185,129,0.25)', borderRadius: 20, padding: '5px 12px', fontSize: 12, color: '#047857', fontWeight: 600 }}>
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#10B981', display: 'inline-block' }} />
           AI Offer Engine Active
@@ -62,13 +62,12 @@ export default function MerchantView({ onBack }) {
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {[
-                { icon: '🎯', label: 'Max discount',   value: `${sliders.maxDiscount}%` },
-                { icon: '🔔', label: 'Trigger',        value: `Quiet hours · < ${sliders.quietThreshold} cust/hr` },
-                { icon: '⏳', label: 'Offer duration', value: `${sliders.offerDuration} minutes` },
-                { icon: '🪑', label: 'Goal',           value: 'Fill seats during quiet periods' },
-              ].map(({ icon, label, value }) => (
+                { label: 'Max discount',   value: `${sliders.maxDiscount}%` },
+                { label: 'Trigger',        value: `Quiet hours · < ${sliders.quietThreshold} cust/hr` },
+                { label: 'Offer duration', value: `${sliders.offerDuration} minutes` },
+                { label: 'Goal',           value: 'Fill seats during quiet periods' },
+              ].map(({ label, value }) => (
                 <div key={label} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 11px', background: C.elevated, borderRadius: 10 }}>
-                  <span style={{ fontSize: 17 }}>{icon}</span>
                   <div style={{ flex: 1 }}>
                     <div style={{ fontSize: 11, color: C.muted, fontWeight: 500 }}>{label}</div>
                     <div style={{ fontSize: 13, fontWeight: 700, color: C.text, marginTop: 1 }}>{value}</div>
@@ -80,22 +79,19 @@ export default function MerchantView({ onBack }) {
         )}
 
         {/* Live stats */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
           {stats && !stats.error && stats.offers_sent_today != null
             ? [
-                { label: 'Sent Today',  value: String(stats.offers_sent_today),           icon: '📤' },
-                { label: 'Accept Rate', value: `${Math.round(stats.accept_rate * 100)}%`, icon: '✅' },
-                { label: 'Cashback',    value: `€${stats.cashback_issued.toFixed(2)}`,    icon: '💰' },
-              ].map(({ label, value, icon }) => (
+                { label: 'Sent Today',  value: String(stats.offers_sent_today) },
+                { label: 'Accept Rate', value: `${Math.round(stats.accept_rate * 100)}%` },
+              ].map(({ label, value }) => (
                 <div key={label} style={{ ...card, padding: '14px 10px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 22, marginBottom: 5 }}>{icon}</div>
                   <div style={{ fontSize: 20, fontWeight: 800, color: C.accent, letterSpacing: '-0.5px' }}>{value}</div>
-                  <div style={{ fontSize: 10, color: C.muted, fontWeight: 600, marginTop: 3 }}>{label}</div>
+                  <div style={{ fontSize: 10, color: C.muted, fontWeight: 600, marginTop: 5 }}>{label}</div>
                 </div>
               ))
-            : ['📤', '✅', '💰'].map((icon, i) => (
+            : Array.from({ length: 2 }).map((_, i) => (
                 <div key={i} style={{ ...card, padding: '14px 10px', textAlign: 'center' }}>
-                  <div style={{ fontSize: 22, marginBottom: 5 }}>{icon}</div>
                   <div style={{ fontSize: 20, fontWeight: 800, color: C.dim }}>—</div>
                 </div>
               ))
@@ -117,7 +113,7 @@ export default function MerchantView({ onBack }) {
                     <div style={{ color: C.muted, fontSize: 12, fontWeight: 600, minWidth: 36, fontVariantNumeric: 'tabular-nums' }}>{time}</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.offer}</div>
-                      <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>📍 {item.distance}</div>
+                      <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{item.distance}</div>
                     </div>
                     <div style={{ background: sc.bg, border: `1px solid ${sc.border}`, color: sc.text, borderRadius: 8, padding: '4px 9px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap', flexShrink: 0 }}>{item.status}</div>
                   </div>
