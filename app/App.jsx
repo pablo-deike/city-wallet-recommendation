@@ -1,44 +1,37 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { History, Compass, Heart, Wallet, User } from 'lucide-react'
+import { Compass, Clock } from 'lucide-react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { generateOffer, claimOffer, redeemOffer, dismissOffer, getUserWallet } from './api'
+import { QRCodeSVG } from 'qrcode.react'
+import { generateOffer, claimOffer, redeemOffer, dismissOffer } from './api'
 import MerchantView from './MerchantView'
+import vicoLogo from './images/vico-logo.svg'
 
 const MERCHANT_COORDS = {
   cafe_mueller: { lat: 52.5200, lon: 13.4050 },
-  pizza_place:  { lat: 52.5210, lon: 13.4060 },
+  pizza_place: { lat: 52.5210, lon: 13.4060 },
 }
 const DEFAULT_LOC = { lat: 52.5185, lon: 13.4010 }
-const AVATAR_URL  = 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=100&h=100'
-const COFFEE_IMG  = 'https://images.unsplash.com/photo-1541167760496-162955ed8a9f?auto=format&fit=crop&q=80&w=600'
+const BASE_PRICE = 4.90
 
-// ── QR grid (static fake QR) ──────────────────────────────────────────────────
-const QR_GRID = (() => {
-  const SIZE = 25
-  let seed = 0xabcd1234
-  const rand = () => { seed = ((seed * 1664525) + 1013904223) >>> 0; return ((seed >>> 16) & 1) === 1 }
-  const grid = Array.from({ length: SIZE }, () => Array.from({ length: SIZE }, () => rand()))
-  const finder = (ro, co) => {
-    for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++)
-      grid[ro+r][co+c] = r===0||r===6||c===0||c===6 || (r>=2&&r<=4&&c>=2&&c<=4)
-    for (let i = 0; i < 8; i++) {
-      if (ro+7 < SIZE && co+i < SIZE) grid[ro+7][co+i] = false
-      if (ro+i < SIZE && co+7 < SIZE) grid[ro+i][co+7] = false
-    }
-  }
-  finder(0, 0); finder(0, SIZE-7); finder(SIZE-7, 0)
-  for (let i = 8; i < SIZE-8; i++) { grid[6][i] = i%2===0; grid[i][6] = i%2===0 }
-  return grid
-})()
+
+// ── Small tappable map thumbnail ─────────────────────────────────────────────
+function MapThumb({ mapsUrl, mapsImageUrl, size = 56, radius = 10 }) {
+  return (
+    <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+      style={{ display: 'block', width: size, height: size, borderRadius: radius, overflow: 'hidden', flexShrink: 0, border: '1px solid #dbe3ef' }}>
+      <img src={mapsImageUrl} alt="map" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+    </a>
+  )
+}
 
 // ── Vanilla Leaflet map ───────────────────────────────────────────────────────
 function LeafletMap({ userLocation, cafeLocation }) {
   const containerRef = useRef(null)
-  const mapRef       = useRef(null)
-  const userMarker   = useRef(null)
-  const cafeMarker   = useRef(null)
+  const mapRef = useRef(null)
+  const userMarker = useRef(null)
+  const cafeMarker = useRef(null)
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
@@ -55,7 +48,7 @@ function LeafletMap({ userLocation, cafeLocation }) {
     if (!map || !userLocation) return
     const icon = L.divIcon({
       html: '<div style="position:relative;width:48px;height:48px"><div class="user-marker-dot"></div><div class="user-marker-pulse"></div></div>',
-      className: '', iconSize: [48,48], iconAnchor: [24,24],
+      className: '', iconSize: [48, 48], iconAnchor: [24, 24],
     })
     if (userMarker.current) userMarker.current.setLatLng([userLocation.lat, userLocation.lon])
     else userMarker.current = L.marker([userLocation.lat, userLocation.lon], { icon }).addTo(map)
@@ -66,10 +59,10 @@ function LeafletMap({ userLocation, cafeLocation }) {
     const map = mapRef.current
     if (!map) return
     if (cafeLocation) {
-      const icon = L.divIcon({ html: '<div class="cafe-marker">☕</div>', className: '', iconSize: [40,40], iconAnchor: [20,20] })
+      const icon = L.divIcon({ html: '<div class="cafe-marker"></div>', className: '', iconSize: [40, 40], iconAnchor: [20, 20] })
       if (cafeMarker.current) cafeMarker.current.setLatLng([cafeLocation.lat, cafeLocation.lon])
       else cafeMarker.current = L.marker([cafeLocation.lat, cafeLocation.lon], { icon }).addTo(map)
-      if (userLocation) map.fitBounds([[userLocation.lat, userLocation.lon],[cafeLocation.lat, cafeLocation.lon]], { padding: [80,80], animate: true })
+      if (userLocation) map.fitBounds([[userLocation.lat, userLocation.lon], [cafeLocation.lat, cafeLocation.lon]], { padding: [80, 80], animate: true })
     } else {
       if (cafeMarker.current) { cafeMarker.current.remove(); cafeMarker.current = null }
     }
@@ -83,20 +76,17 @@ function RoleSelect({ onSelect }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f5f7fb', justifyContent: 'center', alignItems: 'center', padding: '0 28px' }}>
       <div style={{ marginBottom: 48, textAlign: 'center' }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>💳</div>
-        <h1 style={{ fontSize: 28, fontWeight: 800, color: '#111827', letterSpacing: '-0.5px', marginBottom: 8 }}>City Wallet</h1>
+        <img src={vicoLogo} alt="Vico" style={{ width: 180, marginBottom: 24, display: 'block', margin: '0 auto 24px' }} />
         <p style={{ fontSize: 15, color: '#6b7280', lineHeight: 1.5 }}>Who are you today?</p>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%' }}>
         <button onClick={() => onSelect('user')} style={{ width: '100%', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 18, padding: '22px 24px', fontSize: 16, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14, boxShadow: '0 8px 24px rgba(59,130,246,0.2)' }}>
-          <span style={{ fontSize: 28 }}>🧑‍💼</span>
           <div style={{ textAlign: 'left' }}>
             <div>I'm a Customer</div>
             <div style={{ fontSize: 12, fontWeight: 500, opacity: 0.7, marginTop: 2 }}>Find offers near you</div>
           </div>
         </button>
         <button onClick={() => onSelect('merchant')} style={{ width: '100%', background: '#ffffff', color: '#111827', border: '1.5px solid #dbe3ef', borderRadius: 18, padding: '22px 24px', fontSize: 16, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14, boxShadow: '0 4px 16px rgba(15,23,42,0.08)' }}>
-          <span style={{ fontSize: 28 }}>☕</span>
           <div style={{ textAlign: 'left' }}>
             <div>I'm a Merchant</div>
             <div style={{ fontSize: 12, fontWeight: 500, color: '#6b7280', marginTop: 2 }}>Manage your offers & stats</div>
@@ -109,25 +99,29 @@ function RoleSelect({ onSelect }) {
 
 // ── App (user view) ───────────────────────────────────────────────────────────
 export default function App() {
-  const [view,         setView]         = useState('select')
-  const [subTab,       setSubTab]       = useState('explore')
-  const [screen,       setScreen]       = useState('offer')
-  const [offer,        setOffer]        = useState(null)
-  const [qrData,       setQrData]       = useState(null)
-  const [redeemResult, setRedeemResult] = useState(null)
-  const [wallet,       setWallet]       = useState(null)
+  const [view, setView] = useState('select')
+  const [subTab, setSubTab] = useState('explore')
+  const [screen, setScreen] = useState('offer')
+  const [offer, setOffer] = useState(null)
+  const [qrData, setQrData] = useState(null)
   const [userLocation, setUserLocation] = useState(null)
-  const [qrSecs,       setQrSecs]       = useState(0)
+  const [paying, setPaying] = useState(false)
+  const [history, setHistory] = useState([])
+  const [expandedQr, setExpandedQr] = useState(null)
 
   const cafeLocation = offer?.merchant_id ? MERCHANT_COORDS[offer.merchant_id] ?? null : null
 
+  // Parse discount % from strings like "15% off any hot drink"
+  const discountPct = offer ? (parseInt(offer.discount) || 0) : 0
+  const savings = parseFloat((BASE_PRICE * discountPct / 100).toFixed(2))
+  const youPay = parseFloat((BASE_PRICE - savings).toFixed(2))
+
   useEffect(() => {
-    getUserWallet().then(setWallet).catch(() => {})
-    const fetchOffer = (lat, lon) => generateOffer(lat, lon).then(setOffer).catch(() => {})
+    const fetchOffer = (lat, lon) => generateOffer(lat, lon).then(setOffer).catch(() => { })
     if (!navigator.geolocation) { setUserLocation(DEFAULT_LOC); fetchOffer(DEFAULT_LOC.lat, DEFAULT_LOC.lon); return }
     navigator.geolocation.getCurrentPosition(
       pos => { const loc = { lat: pos.coords.latitude, lon: pos.coords.longitude }; setUserLocation(loc); fetchOffer(loc.lat, loc.lon) },
-      ()  => { setUserLocation(DEFAULT_LOC); fetchOffer(DEFAULT_LOC.lat, DEFAULT_LOC.lon) },
+      () => { setUserLocation(DEFAULT_LOC); fetchOffer(DEFAULT_LOC.lat, DEFAULT_LOC.lon) },
       { timeout: 8000, maximumAge: 60000 }
     )
   }, [])
@@ -138,48 +132,49 @@ export default function App() {
     return () => clearTimeout(t)
   }, [screen])
 
+  // Auto-dismiss offer card after 30s
   useEffect(() => {
-    if (qrData?.expires_in_seconds != null) setQrSecs(qrData.expires_in_seconds)
-  }, [qrData])
-
-  useEffect(() => {
-    if (screen !== 'qr') return
-    const id = setInterval(() => setQrSecs(s => s > 0 ? s-1 : 0), 1000)
-    return () => clearInterval(id)
-  }, [screen])
+    if (screen !== 'offer' || !offer) return
+    const t = setTimeout(() => handleReject(), 30000)
+    return () => clearTimeout(t)
+  }, [screen, offer])
 
   async function handleAccept() {
-    try { const data = await claimOffer(offer.offer_id); setQrData(data) } catch {}
+    try { const data = await claimOffer(offer.offer_id); setQrData(data) } catch { }
+    setScreen('payment')
+  }
+
+  async function handlePay() {
+    setPaying(true)
+    try {
+      const token = qrData?.qr_token ?? `QR-FALLBACK-${offer.offer_id}`
+      await redeemOffer(offer.offer_id, token, BASE_PRICE)
+      setHistory(prev => [{
+        id: offer.offer_id,
+        merchant: offer.merchant,
+        discount: offer.discount,
+        mapsUrl: offer.maps_url,
+        mapsImageUrl: offer.maps_image_url,
+        youPay,
+        date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+        qrToken: qrData?.qr_token,
+      }, ...prev])
+    } catch { }
+    setPaying(false)
     setScreen('qr')
   }
-  async function handleReject() { dismissOffer(offer.offer_id).catch(() => {}); setScreen('dismissed') }
-  async function handleMarkUsed() {
-    try {
-      const data = await redeemOffer(offer.offer_id, qrData.qr_token)
-      setRedeemResult(data)
-      if (data?.new_balance != null) setWallet(w => ({ ...w, balance: data.new_balance }))
-    } catch {}
-    setScreen('success')
-  }
 
-  if (view === 'select')   return <RoleSelect onSelect={setView} />
+  async function handleReject() { dismissOffer(offer.offer_id).catch(() => { }); setScreen('dismissed') }
+
+  if (view === 'select') return <RoleSelect onSelect={setView} />
   if (view === 'merchant') return <MerchantView onBack={() => setView('select')} />
-
-  const mm = String(Math.floor(qrSecs / 60)).padStart(2, '0')
-  const ss = String(qrSecs % 60).padStart(2, '0')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f5f7fb' }}>
 
       {/* Header */}
-      <header style={{ position: 'sticky', top: 0, zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderBottom: '1px solid #dbe3ef' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <img src={AVATAR_URL} alt="User" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '1px solid #dbe3ef' }} />
-          <span style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.4px', color: '#111827' }}>Voucher</span>
-        </div>
-        <button style={{ padding: 8, borderRadius: '50%', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', display: 'flex' }}>
-          <History size={24} />
-        </button>
+      <header style={{ position: 'sticky', top: 0, zIndex: 2000, display: 'flex', alignItems: 'center', padding: '12px 20px', background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderBottom: '1px solid #dbe3ef' }}>
+        <img src={vicoLogo} alt="Vico" style={{ height: 36 }} />
       </header>
 
       {/* Main */}
@@ -198,21 +193,23 @@ export default function App() {
                   style={{ position: 'absolute', bottom: 20, left: '50%', zIndex: 1000, width: '100%', padding: '0 20px' }}
                 >
                   <div style={{ overflow: 'hidden', borderRadius: 20, border: '1px solid #dbe3ef', background: '#ffffff', boxShadow: '0 20px 60px rgba(15,23,42,0.16)' }}>
-                    <div style={{ height: 6, background: '#e5e7eb' }}>
-                      <motion.div initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: (offer.valid_minutes ?? 30) * 60, ease: 'linear' }} style={{ height: '100%', background: '#5b9af5' }} />
+                    <div style={{ height: 4, background: '#e5e7eb' }}>
+                      <motion.div initial={{ width: '100%' }} animate={{ width: '0%' }} transition={{ duration: 30, ease: 'linear' }} style={{ height: '100%', background: '#5b9af5' }} />
                     </div>
-                    <div style={{ position: 'relative', height: 176 }}>
-                      <img src={COFFEE_IMG} alt="Offer" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      <div style={{ position: 'absolute', top: 16, right: 16, background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(8px)', borderRadius: 999, padding: '6px 12px', boxShadow: '0 2px 8px rgba(15,23,42,0.15)' }}>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: '#5b9af5' }}>{offer.distance_m}m away</span>
+                    <div style={{ padding: '14px 16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                        <MapThumb mapsUrl={offer.maps_url} mapsImageUrl={offer.maps_image_url} size={56} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
+                            <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b7280', margin: 0 }}>{offer.merchant}</p>
+                            <span style={{ background: '#eef4ff', borderRadius: 999, padding: '2px 8px', fontSize: 11, fontWeight: 700, color: '#5b9af5', flexShrink: 0 }}>{offer.distance_m}m</span>
+                          </div>
+                          <h2 style={{ fontSize: 17, fontWeight: 700, lineHeight: 1.3, color: '#111827', letterSpacing: '-0.2px', margin: 0 }}>{offer.discount}</h2>
+                        </div>
                       </div>
-                    </div>
-                    <div style={{ padding: 24 }}>
-                      <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#6b7280', marginBottom: 8 }}>Exclusive Offer Nearby: {offer.merchant}</p>
-                      <h2 style={{ fontSize: 22, fontWeight: 700, lineHeight: 1.3, color: '#111827', letterSpacing: '-0.3px' }}>{offer.discount}</h2>
-                      <div style={{ marginTop: 32, display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <button onClick={handleAccept} style={{ flex: 1, background: '#5b9af5', color: 'white', border: 'none', borderRadius: 14, padding: 16, fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 4px 16px rgba(91,154,245,0.3)' }}>Accept</button>
-                        <button onClick={handleReject} style={{ padding: 16, fontSize: 14, fontWeight: 700, color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer' }}>Reject</button>
+                      <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <button onClick={handleAccept} style={{ flex: 1, background: '#5b9af5', color: 'white', border: 'none', borderRadius: 12, padding: '13px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 4px 16px rgba(91,154,245,0.3)' }}>Accept</button>
+                        <button onClick={handleReject} style={{ padding: '13px 18px', fontSize: 14, fontWeight: 700, color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer' }}>Reject</button>
                       </div>
                     </div>
                   </div>
@@ -226,68 +223,111 @@ export default function App() {
                 <motion.div key="toast"
                   initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 16 }}
                   transition={{ type: 'spring', damping: 20, stiffness: 300 }}
-                  style={{ position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 1000, background: '#ffffff', borderRadius: 16, padding: '14px 24px', boxShadow: '0 8px 24px rgba(15,23,42,0.12)', fontSize: 14, fontWeight: 600, color: '#6b7280', whiteSpace: 'nowrap', border: '1px solid #dbe3ef' }}
+                  style={{ position: 'absolute', bottom: 24, left: 20, right: 20, zIndex: 1000, background: '#ffffff', borderRadius: 16, padding: '14px 24px', boxShadow: '0 8px 24px rgba(15,23,42,0.12)', fontSize: 14, fontWeight: 600, color: '#6b7280', textAlign: 'center', border: '1px solid #dbe3ef' }}
                 >
                   Got it — we'll find a better moment
                 </motion.div>
               )}
             </AnimatePresence>
 
-            {/* QR screen */}
+            {/* Payment screen */}
             <AnimatePresence>
-              {screen === 'qr' && (
-                <motion.div key="qr" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 30, stiffness: 250 }}
+              {screen === 'payment' && (
+                <motion.div key="payment" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 30, stiffness: 250 }}
                   style={{ position: 'absolute', inset: 0, zIndex: 1500, background: '#f5f7fb', overflowY: 'auto' }}
                 >
-                  <div style={{ padding: '32px 20px 28px', display: 'flex', flexDirection: 'column', gap: 24, minHeight: '100%' }}>
-                    <div style={{ textAlign: 'center' }}>
-                      <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#6b7280', marginBottom: 6 }}>Show this at the counter</p>
-                      {qrData && <p style={{ fontSize: 18, fontWeight: 700, color: '#111827', letterSpacing: '-0.3px' }}>{qrData.merchant} — {qrData.discount}</p>}
+                  <div style={{ padding: '24px 20px 32px', display: 'flex', flexDirection: 'column', gap: 20, minHeight: '100%' }}>
+
+                    {/* Back */}
+                    <button onClick={() => setScreen('offer')} style={{ alignSelf: 'flex-start', background: 'none', border: 'none', color: '#6b7280', fontSize: 14, fontWeight: 600, cursor: 'pointer', padding: 0, display: 'flex', alignItems: 'center', gap: 6 }}>
+                      ← Back
+                    </button>
+
+                    {/* Title */}
+                    <div>
+                      <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.15em', textTransform: 'uppercase', color: '#6b7280', marginBottom: 6 }}>Complete purchase</p>
+                      <h2 style={{ fontSize: 24, fontWeight: 800, color: '#111827', letterSpacing: '-0.4px', margin: 0 }}>Pay for your offer</h2>
                     </div>
-                    {/* QR code — keep white bg for scannability */}
-                    <div style={{ display: 'flex', justifyContent: 'center' }}>
-                      <div style={{ display: 'inline-block', padding: 16, background: 'white', borderRadius: 16, boxShadow: '0 4px 24px rgba(0,0,0,0.4)', lineHeight: 0 }}>
-                        {QR_GRID.map((row, r) => (
-                          <div key={r} style={{ display: 'flex' }}>
-                            {row.map((dark, c) => <div key={c} style={{ width: 9, height: 9, background: dark ? '#111113' : 'white', flexShrink: 0 }} />)}
-                          </div>
-                        ))}
+
+                    {/* Offer summary */}
+                    <div style={{ background: '#ffffff', border: '1px solid #dbe3ef', borderRadius: 16, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
+                      <MapThumb mapsUrl={offer?.maps_url} mapsImageUrl={offer?.maps_image_url} size={52} />
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>{offer?.merchant}</div>
+                        <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{offer?.discount}</div>
                       </div>
                     </div>
-                    <div style={{ background: '#ffffff', border: '1px solid #dbe3ef', borderRadius: 16, padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: 14, color: '#6b7280', fontWeight: 500 }}>Expires in</span>
-                      <span style={{ fontSize: 28, fontWeight: 800, color: qrSecs < 60 ? '#dc2626' : '#111827', fontVariantNumeric: 'tabular-nums', letterSpacing: '2px', transition: 'color 0.3s' }}>{mm}:{ss}</span>
+
+                    {/* Price breakdown */}
+                    <div style={{ background: '#ffffff', border: '1px solid #dbe3ef', borderRadius: 16, overflow: 'hidden' }}>
+                      <div style={{ padding: '14px 20px', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f3f4f6' }}>
+                        <span style={{ fontSize: 14, color: '#6b7280' }}>Original price</span>
+                        <span style={{ fontSize: 14, color: '#6b7280', textDecoration: 'line-through' }}>€{BASE_PRICE.toFixed(2)}</span>
+                      </div>
+                      <div style={{ padding: '14px 20px', display: 'flex', justifyContent: 'space-between', borderBottom: '1px solid #f3f4f6' }}>
+                        <span style={{ fontSize: 14, color: '#16a34a', fontWeight: 600 }}>Discount ({discountPct}%)</span>
+                        <span style={{ fontSize: 14, color: '#16a34a', fontWeight: 600 }}>-€{savings.toFixed(2)}</span>
+                      </div>
+                      <div style={{ padding: '16px 20px', display: 'flex', justifyContent: 'space-between', background: '#f8fafc' }}>
+                        <span style={{ fontSize: 16, fontWeight: 800, color: '#111827' }}>You pay</span>
+                        <span style={{ fontSize: 22, fontWeight: 800, color: '#111827', letterSpacing: '-0.5px' }}>€{youPay.toFixed(2)}</span>
+                      </div>
                     </div>
-                    <button onClick={handleMarkUsed} style={{ width: '100%', background: '#5b9af5', color: 'white', border: 'none', borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 700, cursor: 'pointer', marginTop: 'auto', boxShadow: '0 4px 16px rgba(91,154,245,0.3)' }}>Mark as Used</button>
+
+                    {/* Payment method */}
+                    <div>
+                      <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b7280', marginBottom: 10 }}>Payment method</p>
+                      <div style={{ background: '#ffffff', border: '2px solid #5b9af5', borderRadius: 16, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                          <div>
+                            <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>Vico</div>
+                            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 1 }}>Default payment method</div>
+                          </div>
+                        </div>
+                        <div style={{ width: 18, height: 18, borderRadius: '50%', background: '#5b9af5', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <div style={{ width: 6, height: 6, borderRadius: '50%', background: 'white' }} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Pay button */}
+                    <button onClick={handlePay} disabled={paying}
+                      style={{ width: '100%', background: paying ? '#93c5fd' : '#5b9af5', color: 'white', border: 'none', borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 700, cursor: paying ? 'not-allowed' : 'pointer', marginTop: 'auto', boxShadow: '0 4px 16px rgba(91,154,245,0.3)', transition: 'background 0.2s' }}
+                    >
+                      {paying ? 'Processing…' : `Pay €${youPay.toFixed(2)}`}
+                    </button>
                   </div>
                 </motion.div>
               )}
             </AnimatePresence>
 
-            {/* Success screen */}
+            {/* QR screen — shown after payment */}
             <AnimatePresence>
-              {screen === 'success' && (
-                <motion.div key="success" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 30, stiffness: 250 }}
+              {screen === 'qr' && (
+                <motion.div key="qr" initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }} transition={{ type: 'spring', damping: 30, stiffness: 250 }}
                   style={{ position: 'absolute', inset: 0, zIndex: 1500, background: '#f5f7fb', overflowY: 'auto' }}
                 >
-                  <div style={{ padding: '48px 24px 32px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24, minHeight: '100%' }}>
-                    <div style={{ fontSize: 72, lineHeight: 1 }}>✅</div>
-                    <div style={{ textAlign: 'center' }}>
-                      <h2 style={{ fontSize: 28, fontWeight: 800, color: '#111827', letterSpacing: '-0.5px', marginBottom: 8 }}>Enjoy your drink!</h2>
-                      <p style={{ fontSize: 15, color: '#6b7280', lineHeight: 1.6 }}>The barista has redeemed your offer.</p>
+                  <div style={{ padding: '32px 20px 32px', display: 'flex', flexDirection: 'column', gap: 20, minHeight: '100%' }}>
+
+                    {/* Confirmed badge */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#dcfce7', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14 }}>✓</div>
+                      <span style={{ fontSize: 14, fontWeight: 700, color: '#16a34a' }}>Payment confirmed</span>
                     </div>
-                    {redeemResult && (
-                      <div style={{ width: '100%', background: '#ffffff', border: '1px solid #dbe3ef', borderRadius: 20, padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0', borderBottom: '1px solid #e5e7eb' }}>
-                          <span style={{ fontSize: 14, color: '#6b7280', fontWeight: 500 }}>Cashback earned</span>
-                          <span style={{ fontSize: 16, fontWeight: 800, color: '#5b9af5' }}>+€{redeemResult.cashback_earned.toFixed(2)}</span>
-                        </div>
-                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 0' }}>
-                          <span style={{ fontSize: 14, color: '#6b7280', fontWeight: 500 }}>New balance</span>
-                          <span style={{ fontSize: 18, fontWeight: 800, color: '#111827' }}>€{redeemResult.new_balance.toFixed(2)}</span>
-                        </div>
+
+                    {/* Instruction */}
+                    <div>
+                      <h2 style={{ fontSize: 22, fontWeight: 800, color: '#111827', letterSpacing: '-0.4px', margin: 0 }}>Show this at {qrData?.merchant ?? offer?.merchant}</h2>
+                      <p style={{ fontSize: 14, color: '#6b7280', marginTop: 6 }}>{qrData?.discount ?? offer?.discount}</p>
+                    </div>
+
+                    {/* QR code */}
+                    <div style={{ display: 'flex', justifyContent: 'center' }}>
+                      <div style={{ display: 'inline-block', padding: 16, background: 'white', borderRadius: 16, boxShadow: '0 4px 24px rgba(0,0,0,0.4)', lineHeight: 0 }}>
+                        <QRCodeSVG value={qrData?.qr_token ?? `QR-FALLBACK-${offer?.offer_id}`} size={225} />
                       </div>
-                    )}
+                    </div>
+
                     <button onClick={() => setScreen('offer')} style={{ width: '100%', background: '#5b9af5', color: 'white', border: 'none', borderRadius: 14, padding: 16, fontSize: 16, fontWeight: 700, cursor: 'pointer', marginTop: 'auto', boxShadow: '0 4px 16px rgba(91,154,245,0.3)' }}>Done</button>
                   </div>
                 </motion.div>
@@ -296,20 +336,45 @@ export default function App() {
           </>
         )}
 
-        {subTab === 'wallet' && (
-          <div style={{ padding: '32px 20px', display: 'flex', flexDirection: 'column', gap: 20 }}>
-            <h2 style={{ fontSize: 24, fontWeight: 700, color: '#111827', letterSpacing: '-0.4px' }}>Your Wallet</h2>
-            <div style={{ background: '#eaf2ff', borderRadius: 20, padding: '28px 24px', color: '#111827', border: '1px solid #cfe0ff' }}>
-              <p style={{ fontSize: 11, fontWeight: 700, opacity: 0.7, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 10 }}>Cashback Balance</p>
-              <p style={{ fontSize: 44, fontWeight: 800, letterSpacing: '-1px' }}>{wallet?.balance != null ? `€${wallet.balance.toFixed(2)}` : '—'}</p>
-              <p style={{ fontSize: 13, opacity: 0.65, marginTop: 8 }}>EUR · City Wallet</p>
-            </div>
-          </div>
-        )}
-
-        {(subTab === 'saved' || subTab === 'account') && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#9ca3af', fontSize: 15, fontWeight: 600 }}>
-            {subTab === 'saved' ? 'Saved offers coming soon' : 'Account coming soon'}
+        {subTab === 'history' && (
+          <div style={{ padding: '28px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <h2 style={{ fontSize: 24, fontWeight: 700, color: '#111827', letterSpacing: '-0.4px', margin: 0 }}>My Offers</h2>
+            {history.length === 0 ? (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 60, color: '#9ca3af' }}>
+                <span style={{ fontSize: 15, fontWeight: 600 }}>No accepted offers yet</span>
+              </div>
+            ) : (
+              history.map(item => (
+                <div key={item.id} style={{ background: '#ffffff', border: '1px solid #dbe3ef', borderRadius: 16, overflow: 'hidden' }}>
+                  <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <MapThumb mapsUrl={item.mapsUrl} mapsImageUrl={item.mapsImageUrl} size={48} radius={8} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>{item.merchant}</div>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{item.discount}</div>
+                    </div>
+                    <div style={{ textAlign: 'right', flexShrink: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 800, color: '#111827' }}>€{item.youPay.toFixed(2)}</div>
+                    </div>
+                  </div>
+                  <div style={{ borderTop: '1px solid #f3f4f6', padding: '10px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 500 }}>{item.date}</span>
+                    <button
+                      onClick={() => setExpandedQr(expandedQr === item.id ? null : item.id)}
+                      style={{ background: '#f1f5f9', border: 'none', borderRadius: 8, padding: '5px 12px', fontSize: 12, fontWeight: 700, color: '#374151', cursor: 'pointer' }}
+                    >
+                      {expandedQr === item.id ? 'Hide QR' : 'Show QR'}
+                    </button>
+                  </div>
+                  {expandedQr === item.id && (
+                    <div style={{ borderTop: '1px solid #f3f4f6', padding: '16px', display: 'flex', justifyContent: 'center', background: '#f8fafc' }}>
+                      <div style={{ display: 'inline-block', padding: 12, background: 'white', borderRadius: 12, boxShadow: '0 2px 12px rgba(0,0,0,0.15)', lineHeight: 0 }}>
+                        <QRCodeSVG value={item.qrToken ?? `QR-FALLBACK-${item.id}`} size={175} />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         )}
       </main>
@@ -317,7 +382,7 @@ export default function App() {
       {/* Bottom nav */}
       <nav style={{ borderTop: '1px solid #dbe3ef', background: '#ffffff', paddingTop: 8, paddingBottom: 14, flexShrink: 0, zIndex: 2000, position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: '0 8px' }}>
-          {[{ key: 'explore', Icon: Compass, label: 'Explore' }, { key: 'saved', Icon: Heart, label: 'Saved' }, { key: 'wallet', Icon: Wallet, label: 'Wallet' }, { key: 'account', Icon: User, label: 'Account' }].map(({ key, Icon, label }) => (
+          {[{ key: 'explore', Icon: Compass, label: 'Explore' }, { key: 'history', Icon: Clock, label: 'History' }].map(({ key, Icon, label }) => (
             <button key={key} onClick={() => setSubTab(key)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '4px 12px', background: 'none', border: 'none', cursor: 'pointer', color: subTab === key ? '#111827' : '#9ca3af', transition: 'color 0.15s' }}>
               <Icon size={24} />
               <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.04em' }}>{label}</span>
