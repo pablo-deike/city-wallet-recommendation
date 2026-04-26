@@ -1,12 +1,20 @@
-import { useState, useEffect, useMemo, useRef } from 'react'
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { Compass, Clock } from 'lucide-react'
+import { Compass, Clock, Sparkles } from 'lucide-react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { QRCodeSVG } from 'qrcode.react'
 import { generateOffer, claimOffer, redeemOffer, dismissOffer } from './api'
 import { loadGemma4WebHumanizer } from './lib/localPersonalization'
 import { resolveDisplayOffer } from './lib/localPersonalization/resolveDisplayOffer'
+import {
+  appendPreferenceEntry,
+  loadPreferenceHistory,
+  mergePreferenceIntent,
+  removePreferenceEntry,
+  savePreferenceHistory,
+} from './lib/preferenceHistory'
+import PreferenceSheet from './PreferenceSheet'
 import MerchantView from './MerchantView'
 import vicoLogo from './images/vico-logo.svg'
 
@@ -35,7 +43,7 @@ function getBrowserLocale() {
   }
 }
 
-function buildLocalContext(userLocation, history) {
+function buildLocalContext(userLocation, history, preferenceState) {
   return {
     locale: getBrowserLocale(),
     weather: 'overcast',
@@ -46,6 +54,8 @@ function buildLocalContext(userLocation, history) {
       : null,
     acceptedOfferCount: history.length,
     recentAcceptedMerchants: history.slice(0, 3).map(item => item.merchant),
+    userIntent: preferenceState?.intent ?? '',
+    preferenceEntries: preferenceState?.entries ?? [],
   }
 }
 
@@ -167,11 +177,15 @@ export default function App() {
   const [expandedQr, setExpandedQr] = useState(null)
   const [localRuntime, setLocalRuntime] = useState(null)
   const [localRuntimeReady, setLocalRuntimeReady] = useState(false)
+  const [preferenceHistory, setPreferenceHistory] = useState(() => loadPreferenceHistory())
+  const [preferenceSheetMode, setPreferenceSheetMode] = useState('closed')
+  const [onboardingShown, setOnboardingShown] = useState(false)
 
+  const preferenceIntent = useMemo(() => mergePreferenceIntent(preferenceHistory), [preferenceHistory])
   const cafeLocation = offer?.merchant_id ? MERCHANT_COORDS[offer.merchant_id] ?? null : null
   const localContext = useMemo(
-    () => buildLocalContext(userLocation, history),
-    [userLocation, history],
+    () => buildLocalContext(userLocation, history, { intent: preferenceIntent, entries: preferenceHistory }),
+    [userLocation, history, preferenceIntent, preferenceHistory],
   )
   const offerEmoji = getOfferEmoji(offer)
   const offerEmojiSet = getOfferEmojiSet(offer)
@@ -182,17 +196,60 @@ export default function App() {
   const savings = parseFloat((BASE_PRICE * discountPct / 100).toFixed(2))
   const youPay = parseFloat((BASE_PRICE - savings).toFixed(2))
 
+  const fetchOfferForLocation = useCallback(
+    (lat, lon) => generateOffer(lat, lon).then(setRawOffer).catch(() => {}),
+    [],
+  )
+
+  const handleAddPreferenceEntry = useCallback(({ source, content }) => {
+    let didAdd = false
+    setPreferenceHistory(prev => {
+      const next = appendPreferenceEntry(prev, { source, content })
+      didAdd = next.length !== prev.length || next[0]?.id !== prev[0]?.id
+      const sanitized = savePreferenceHistory(next)
+      return sanitized
+    })
+    return didAdd
+  }, [])
+
+  const handleRemovePreferenceEntry = useCallback(entryId => {
+    setPreferenceHistory(prev => {
+      const next = removePreferenceEntry(prev, entryId)
+      return savePreferenceHistory(next)
+    })
+  }, [])
+
   useEffect(() => {
     if (view !== 'user') return
+    if (onboardingShown) return
 
-    const fetchOffer = (lat, lon) => generateOffer(lat, lon).then(setRawOffer).catch(() => {})
-    if (!navigator.geolocation) { setUserLocation(DEFAULT_LOC); fetchOffer(DEFAULT_LOC.lat, DEFAULT_LOC.lon); return }
+    setPreferenceSheetMode('onboarding')
+    setOnboardingShown(true)
+  }, [view, onboardingShown])
+
+  useEffect(() => {
+    if (view !== 'user') return
+    if (preferenceSheetMode === 'onboarding') return
+    if (userLocation) return
+
+    if (!navigator.geolocation) {
+      setUserLocation(DEFAULT_LOC)
+      fetchOfferForLocation(DEFAULT_LOC.lat, DEFAULT_LOC.lon)
+      return
+    }
     navigator.geolocation.getCurrentPosition(
-      pos => { const loc = { lat: pos.coords.latitude, lon: pos.coords.longitude }; setUserLocation(loc); fetchOffer(loc.lat, loc.lon) },
-      () => { setUserLocation(DEFAULT_LOC); fetchOffer(DEFAULT_LOC.lat, DEFAULT_LOC.lon) },
+      pos => {
+        const loc = { lat: pos.coords.latitude, lon: pos.coords.longitude }
+        setUserLocation(loc)
+        fetchOfferForLocation(loc.lat, loc.lon)
+      },
+      () => {
+        setUserLocation(DEFAULT_LOC)
+        fetchOfferForLocation(DEFAULT_LOC.lat, DEFAULT_LOC.lon)
+      },
       { timeout: 8000, maximumAge: 60000 }
     )
-  }, [view])
+  }, [view, preferenceSheetMode, userLocation, fetchOfferForLocation])
 
   useEffect(() => {
     if (view !== 'user') return
@@ -303,6 +360,30 @@ export default function App() {
     setScreen('dismissed')
   }
 
+  function handleOpenPreferences() {
+    setPreferenceSheetMode('map')
+  }
+
+  function handleClosePreferences() {
+    if (preferenceSheetMode === 'onboarding') {
+      setPreferenceSheetMode('closed')
+      return
+    }
+
+    setPreferenceSheetMode('closed')
+  }
+
+  function handleSkipOnboarding() {
+    setPreferenceSheetMode('closed')
+  }
+
+  function handlePrimaryPreferences() {
+    const targetLocation = userLocation ?? DEFAULT_LOC
+    setPreferenceSheetMode('closed')
+    setScreen('offer')
+    fetchOfferForLocation(targetLocation.lat, targetLocation.lon)
+  }
+
   if (view === 'select') return <RoleSelect onSelect={setView} />
   if (view === 'merchant') return <MerchantView onBack={() => setView('select')} />
 
@@ -320,6 +401,51 @@ export default function App() {
         {subTab === 'explore' && (
           <>
             <LeafletMap userLocation={userLocation} cafeLocation={cafeLocation} />
+
+            {/* Floating preference button */}
+            {(screen === 'offer' || screen === 'dismissed') && (
+              <button
+                onClick={handleOpenPreferences}
+                aria-label="Tune my offer"
+                style={{
+                  position: 'absolute',
+                  top: 16,
+                  right: 16,
+                  zIndex: 1100,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '10px 14px',
+                  background: 'rgba(255,255,255,0.96)',
+                  border: '1px solid #dbe3ef',
+                  borderRadius: 999,
+                  color: '#111827',
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  boxShadow: '0 8px 20px rgba(15,23,42,0.12)',
+                  backdropFilter: 'blur(8px)',
+                  WebkitBackdropFilter: 'blur(8px)',
+                }}
+              >
+                <Sparkles size={14} color="#5b9af5" />
+                Tune my offer
+                {preferenceHistory.length > 0 && (
+                  <span
+                    style={{
+                      background: '#eef4ff',
+                      color: '#5b9af5',
+                      borderRadius: 999,
+                      padding: '1px 7px',
+                      fontSize: 10,
+                      fontWeight: 800,
+                    }}
+                  >
+                    {preferenceHistory.length}
+                  </span>
+                )}
+              </button>
+            )}
 
             {/* Offer card */}
             <AnimatePresence>
@@ -533,6 +659,17 @@ export default function App() {
             )}
           </div>
         )}
+
+        <PreferenceSheet
+          open={preferenceSheetMode !== 'closed'}
+          mode={preferenceSheetMode === 'onboarding' ? 'onboarding' : 'map'}
+          history={preferenceHistory}
+          onAddEntry={handleAddPreferenceEntry}
+          onRemoveEntry={handleRemovePreferenceEntry}
+          onPrimary={handlePrimaryPreferences}
+          onSkip={handleSkipOnboarding}
+          onClose={handleClosePreferences}
+        />
       </main>
 
       {/* Bottom nav */}
