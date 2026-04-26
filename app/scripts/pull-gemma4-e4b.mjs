@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 
 import { createWriteStream } from 'node:fs'
-import { mkdir, rename, stat, unlink } from 'node:fs/promises'
+import { copyFile, mkdir, rename, stat, unlink } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { pipeline } from 'node:stream/promises'
+import { fileURLToPath } from 'node:url'
 
 const DEFAULT_MODEL_URL =
   'https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it-web.task'
@@ -12,7 +13,10 @@ const DEFAULT_OUTPUT_PATH = resolve(
   '../public/models/gemma-4-E4B-it-web.task',
 )
 
-const modelUrl = process.env.GEMMA4_E4B_MODEL_URL || DEFAULT_MODEL_URL
+const modelSource =
+  process.env.GEMMA4_E4B_MODEL_SOURCE ||
+  process.env.GEMMA4_E4B_MODEL_URL ||
+  DEFAULT_MODEL_URL
 const outputPath = resolve(process.env.GEMMA4_E4B_OUTPUT || DEFAULT_OUTPUT_PATH)
 const partialPath = `${outputPath}.partial`
 
@@ -43,10 +47,32 @@ function buildHeaders() {
   return headers
 }
 
+function parseRemoteUrl(source) {
+  try {
+    const url = new URL(source)
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null
+  } catch {
+    return null
+  }
+}
+
+function resolveLocalSource(source) {
+  try {
+    const url = new URL(source)
+
+    if (url.protocol === 'file:') {
+      return fileURLToPath(url)
+    }
+  } catch {
+    return resolve(source)
+  }
+
+  return resolve(source)
+}
+
 function formatFetchFailure(error, url) {
-  const host = new URL(url).hostname
   const cause = error?.cause
-  const lines = [`Download failed while contacting ${host}.`]
+  const lines = [`Download failed while contacting ${url.hostname}.`]
 
   if (cause?.code) {
     lines.push(`Network cause: ${cause.code}`)
@@ -58,7 +84,7 @@ function formatFetchFailure(error, url) {
 
   if (cause?.code === 'EAI_AGAIN' || cause?.code === 'ENOTFOUND') {
     lines.push(
-      'The host could not be resolved from this machine. Check DNS/outbound network access, or set GEMMA4_E4B_MODEL_URL to a reachable mirror.',
+      'The host could not be resolved from this machine. Check DNS/outbound network access, or set GEMMA4_E4B_MODEL_SOURCE to a local file or reachable mirror.',
     )
   } else if (cause?.code === 'ECONNRESET' || cause?.code === 'ETIMEDOUT') {
     lines.push('The connection dropped or timed out. Retry once network access is available.')
@@ -77,17 +103,19 @@ async function removePartialFile() {
   }
 }
 
-async function main() {
-  await mkdir(dirname(outputPath), { recursive: true })
-  await removePartialFile()
+async function pullRemoteModel(url) {
+  console.log(`Downloading Gemma 4 E4B web model from ${url.href}`)
 
-  console.log(`Downloading Gemma 4 E4B web model from ${modelUrl}`)
-  console.log(`Writing to ${outputPath}`)
+  let response
 
-  const response = await fetch(modelUrl, {
-    headers: buildHeaders(),
-    redirect: 'follow',
-  })
+  try {
+    response = await fetch(url, {
+      headers: buildHeaders(),
+      redirect: 'follow',
+    })
+  } catch (error) {
+    throw new Error(formatFetchFailure(error, url))
+  }
 
   if (!response.ok || !response.body) {
     const body = await response.text().catch(() => '')
@@ -106,18 +134,43 @@ async function main() {
   console.log(`Expected download size: ${formatBytes(contentLength)}`)
 
   await pipeline(response.body, createWriteStream(partialPath))
+}
+
+async function pullLocalModel(source) {
+  const sourcePath = resolveLocalSource(source)
+  const sourceFile = await stat(sourcePath)
+
+  if (!sourceFile.isFile()) {
+    throw new Error(`Local model source is not a file: ${sourcePath}`)
+  }
+
+  console.log(`Copying Gemma 4 E4B web model from ${sourcePath}`)
+  console.log(`Expected copy size: ${formatBytes(sourceFile.size)}`)
+  await copyFile(sourcePath, partialPath)
+}
+
+async function main() {
+  await mkdir(dirname(outputPath), { recursive: true })
+  await removePartialFile()
+
+  console.log(`Writing to ${outputPath}`)
+
+  const remoteUrl = parseRemoteUrl(modelSource)
+
+  if (remoteUrl) {
+    await pullRemoteModel(remoteUrl)
+  } else {
+    await pullLocalModel(modelSource)
+  }
+
   await rename(partialPath, outputPath)
 
   const file = await stat(outputPath)
-  console.log(`Downloaded ${formatBytes(file.size)} to ${outputPath}`)
+  console.log(`Installed ${formatBytes(file.size)} to ${outputPath}`)
 }
 
 main().catch(async (error) => {
   await removePartialFile().catch(() => {})
-  if (error instanceof Error && error.message === 'fetch failed') {
-    console.error(formatFetchFailure(error, modelUrl))
-  } else {
-    console.error(error instanceof Error ? error.message : error)
-  }
+  console.error(error instanceof Error ? error.message : error)
   process.exit(1)
 })
