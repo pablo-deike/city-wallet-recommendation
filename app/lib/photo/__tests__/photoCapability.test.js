@@ -15,6 +15,14 @@ describe('detectPhotoCapability', () => {
     expect(detectPhotoCapability({ cityWalletPhotoAnalyzer: {} })).toBe(false)
   })
 
+  it('scenario browser file-picker runtime returns true without a local analyzer', () => {
+    expect(
+      detectPhotoCapability({
+        document: { createElement: vi.fn() },
+      }),
+    ).toBe(true)
+  })
+
   it('scenario supported runtime returns true when a local analyzer function exists', () => {
     expect(
       detectPhotoCapability({
@@ -85,6 +93,20 @@ describe('defaultPhotoFactory', () => {
     expect(defaultPhotoFactory({})).toEqual({ supported: false })
   })
 
+  it('scenario browser-only runtime falls back to a local photo note without an analyzer', async () => {
+    const factory = defaultPhotoFactory({ document: { createElement: vi.fn() } })
+
+    expect(factory.supported).toBe(true)
+    expect(factory.analyzes).toBe(false)
+    await expect(factory.createSession().analyze({ name: 'matcha-latte.jpg' })).resolves.toBe('Photo of matcha latte')
+  })
+
+  it('scenario generic camera filename falls back to a safe generic note', async () => {
+    const factory = defaultPhotoFactory({ document: { createElement: vi.fn() } })
+
+    await expect(factory.createSession().analyze({ name: 'IMG_20260426_143000.jpg' })).resolves.toBe('Photo of something I like')
+  })
+
   it('scenario supported runtime creates constructor-injected analysis sessions', async () => {
     const analyzer = {
       prefix: 'local',
@@ -95,6 +117,7 @@ describe('defaultPhotoFactory', () => {
     const factory = defaultPhotoFactory({ cityWalletPhotoAnalyzer: analyzer })
 
     expect(factory.supported).toBe(true)
+    expect(factory.analyzes).toBe(true)
     await expect(factory.createSession().analyze({})).resolves.toBe('local wine-bar window seat')
   })
 })

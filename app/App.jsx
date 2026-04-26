@@ -44,6 +44,20 @@ function getBrowserLocale() {
 }
 
 function buildLocalContext(userLocation, history, preferenceState) {
+  const recentRedemptions = history.slice(0, 5).map(item => ({
+    merchant: item.merchant,
+    discount: item.discount,
+    redeemedAt: item.date,
+  }))
+  const merchantCounts = recentRedemptions.reduce((acc, item) => {
+    if (!item.merchant) return acc
+    acc[item.merchant] = (acc[item.merchant] ?? 0) + 1
+    return acc
+  }, {})
+  const repeatMerchants = Object.entries(merchantCounts)
+    .filter(([, count]) => count > 1)
+    .map(([merchant]) => merchant)
+
   return {
     locale: getBrowserLocale(),
     weather: 'overcast',
@@ -53,7 +67,8 @@ function buildLocalContext(userLocation, history, preferenceState) {
       ? { lat: userLocation.lat, lon: userLocation.lon }
       : null,
     acceptedOfferCount: history.length,
-    recentAcceptedMerchants: history.slice(0, 3).map(item => item.merchant),
+    recentRedemptions,
+    repeatMerchants,
     userIntent: preferenceState?.intent ?? '',
     preferenceEntries: preferenceState?.entries ?? [],
   }

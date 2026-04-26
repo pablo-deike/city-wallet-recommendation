@@ -18,8 +18,38 @@ function getLocalAnalyzer(globalLike) {
   return analyzer
 }
 
+function hasFilePickerSupport(globalLike) {
+  return Boolean(globalLike?.document && typeof globalLike.document.createElement === 'function')
+}
+
+function extractFilenameHint(fileName) {
+  if (typeof fileName !== 'string') {
+    return ''
+  }
+
+  const tokens = fileName
+    .replace(/\.[^.]+$/, '')
+    .split(/[^a-zA-Z0-9]+/)
+    .map(token => token.trim().toLowerCase())
+    .filter(Boolean)
+    .filter(token => !/^\d+$/.test(token))
+    .filter(token => !['img', 'image', 'images', 'photo', 'photos', 'picture', 'pictures', 'pxl', 'dsc', 'mvimg', 'screenshot'].includes(token))
+
+  return tokens.join(' ')
+}
+
+function summarizeSelectedPhoto(file) {
+  const hint = extractFilenameHint(file?.name)
+
+  if (hint) {
+    return `Photo of ${hint}`
+  }
+
+  return 'Photo of something I like'
+}
+
 export function detectPhotoCapability(globalLike = globalThis) {
-  return Boolean(getLocalAnalyzer(globalLike))
+  return Boolean(getLocalAnalyzer(globalLike) || hasFilePickerSupport(globalLike))
 }
 
 export function normalizePhotoSummary(value) {
@@ -63,14 +93,25 @@ export function createPhotoAnalysisSession({ analyze } = {}) {
 export function defaultPhotoFactory(globalLike = globalThis) {
   const analyzer = getLocalAnalyzer(globalLike)
 
-  if (!analyzer) {
+  if (analyzer) {
+    return {
+      supported: true,
+      analyzes: true,
+      createSession() {
+        return createPhotoAnalysisSession({ analyze: analyzer.analyze.bind(analyzer) })
+      },
+    }
+  }
+
+  if (!hasFilePickerSupport(globalLike)) {
     return { supported: false }
   }
 
   return {
     supported: true,
+    analyzes: false,
     createSession() {
-      return createPhotoAnalysisSession({ analyze: analyzer.analyze.bind(analyzer) })
+      return createPhotoAnalysisSession({ analyze: summarizeSelectedPhoto })
     },
   }
 }
