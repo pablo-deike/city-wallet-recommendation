@@ -1,6 +1,16 @@
 import { boundEmoji, boundHeadline, boundReason } from './sanitize'
 import { probeLocalRuntime } from './runtime'
 
+export {
+  GEMMA_4_DEFAULT_WEB_MODEL_PATH,
+  GEMMA_4_E2B_IT_WEB_MODEL_PATH,
+  GEMMA_4_E4B_IT_WEB_MODEL_PATH,
+  GEMMA_4_WEB_WASM_BASE_PATH,
+  GEMMA_4_WEB_RUNTIME_NAME,
+  canLoadGemma4WebHumanizer,
+  loadGemma4WebHumanizer,
+} from './gemma4WebHumanizer'
+
 function publicFallbackReason(reason) {
   if (!reason || reason === 'no-local-runtime') {
     return 'runtime-unavailable'

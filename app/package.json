@@ -6,10 +6,12 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
+    "pull:gemma4:e4b": "node scripts/pull-gemma4-e4b.mjs",
     "test": "node scripts/run-vitest.mjs",
     "test:run": "node scripts/run-vitest.mjs run"
   },
   "dependencies": {
+    "@mediapipe/tasks-genai": "^0.10.27",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },
