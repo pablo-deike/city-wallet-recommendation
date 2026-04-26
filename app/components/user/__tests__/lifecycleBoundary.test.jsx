@@ -11,6 +11,7 @@ vi.mock('../../../lib/localPersonalization/index', () => ({
 import UserView from '../UserView'
 import { clearWalletPreferences } from '../../../lib/walletPreferences'
 import { humanizeOfferOnDevice } from '../../../lib/localPersonalization/index'
+import { createPhotoAnalysisSession } from '../../../lib/photo/photoCapability'
 
 const humanizeOfferOnDeviceMock = vi.mocked(humanizeOfferOnDevice)
 const mountedTrees = []
@@ -21,6 +22,11 @@ const ALLOWED_URL_PATTERN = /^http:\/\/localhost:8000\//
 const FORBIDDEN_BODY_FRAGMENTS = [
   'Quiet patio coffee',
   'After-work spritz',
+  'photoSummary',
+  'data:image/',
+  'data:image/png',
+  'data:image/jpeg',
+  'analyzingPhoto',
   'typedIntent',
   'localContext',
   'local_personalization',
@@ -242,6 +248,41 @@ function getVoiceButton(container, label) {
   return container.querySelector(`button[aria-label="${label}"]`)
 }
 
+function getPhotoButton(container, label) {
+  return container.querySelector(`button[aria-label="${label}"]`)
+}
+
+function getPhotoInput(container) {
+  return container.querySelector('input[type="file"][accept="image/*"]')
+}
+
+async function selectPhoto(container, file) {
+  const input = getPhotoInput(container)
+
+  if (!input) {
+    throw new Error('Expected photo input to exist')
+  }
+
+  await act(async () => {
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: [file],
+    })
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+}
+
+function createPhotoFactory({ supported = true, analyze } = {}) {
+  if (!supported) {
+    return vi.fn(() => ({ supported: false }))
+  }
+
+  return vi.fn(() => ({
+    supported: true,
+    createSession: vi.fn(() => createPhotoAnalysisSession({ analyze })),
+  }))
+}
+
 function getGuardrail(container) {
   return container.querySelector('[data-testid="intent-guardrail"]')
 }
@@ -258,22 +299,26 @@ beforeEach(() => {
   clearWalletPreferences()
   capturedRequests.length = 0
   humanizeOfferOnDeviceMock.mockReset()
-  humanizeOfferOnDeviceMock.mockImplementation((offer, localContext = {}) => ({
-    ...offer,
-    headline: localContext.typedIntent
-      ? `Personalized for ${localContext.typedIntent}`
-      : 'Personalized default headline',
-    reason: localContext.typedIntent
-      ? `Reason for ${localContext.typedIntent}`
-      : 'Reason with no typed intent',
-    emoji: '✨',
-    local_personalization: {
-      source: 'local-runtime',
-      status: 'ai',
-      fallbackReason: null,
-      runtime: 'window-ai',
-    },
-  }))
+  humanizeOfferOnDeviceMock.mockImplementation((offer, localContext = {}) => {
+    const localLabel = [localContext.typedIntent, localContext.photoSummary].filter(Boolean).join(' + ')
+
+    return {
+      ...offer,
+      headline: localLabel
+        ? `Personalized for ${localLabel}`
+        : 'Personalized default headline',
+      reason: localLabel
+        ? `Reason for ${localLabel}`
+        : 'Reason with no typed intent',
+      emoji: '✨',
+      local_personalization: {
+        source: 'local-runtime',
+        status: 'ai',
+        fallbackReason: null,
+        runtime: 'window-ai',
+      },
+    }
+  })
   vi.stubGlobal('fetch', createFetchCaptureSpy())
 })
 
@@ -305,6 +350,7 @@ describe('UserView lifecycle privacy boundary', () => {
 
     expect(humanizeOfferOnDeviceMock).toHaveBeenLastCalledWith(rawOffer, {
       typedIntent: 'Quiet patio coffee',
+      photoSummary: '',
     })
     expect(container.textContent).toContain('Personalized for Quiet patio coffee')
 
@@ -373,6 +419,7 @@ describe('UserView lifecycle privacy boundary', () => {
 
     expect(humanizeOfferOnDeviceMock).toHaveBeenLastCalledWith(rawOffer, {
       typedIntent: 'After-work spritz',
+      photoSummary: '',
     })
     expect(getIntentInput(container)?.value).toBe('After-work spritz')
     expect(getGuardrail(container)?.textContent).toContain("Demo: please drink responsibly. We don't verify age.")
@@ -428,6 +475,115 @@ describe('UserView lifecycle privacy boundary', () => {
     expect(capturedRequests.every(({ url }) => url.startsWith(BASE_URL))).toBe(true)
     expect(capturedRequests.some(({ body }) => body.includes('restrictedCategory'))).toBe(false)
     expect(capturedRequests.some(({ body }) => body.includes('matchedTerm'))).toBe(false)
+  })
+
+  it('keeps photo summaries and image artifacts off the wire across dismiss, claim, and redeem flows', async () => {
+    const analyze = vi.fn().mockResolvedValue('After-work spritz at the wine bar')
+    const photoFactory = createPhotoFactory({ analyze })
+    const photo = new File(['data:image/png;base64,raw-image-bytes'], 'spritz.png', { type: 'image/png' })
+    const { container } = await mountUserView({ photoFactory })
+    const photoInput = getPhotoInput(container)
+    const photoInputClickSpy = vi.spyOn(photoInput, 'click').mockImplementation(() => {})
+
+    expect(capturedRequests.map(({ path }) => path)).toEqual(['/offers/generate'])
+    expect(getPhotoButton(container, 'Add photo context')).toBeTruthy()
+
+    await click(getPhotoButton(container, 'Add photo context'))
+    expect(photoInputClickSpy).toHaveBeenCalledTimes(1)
+
+    await selectPhoto(container, photo)
+    await flushEffects()
+
+    expect(analyze).toHaveBeenCalledWith(photo)
+    expect(container.querySelector('[data-testid="photo-summary"]')?.textContent).toContain(
+      'After-work spritz at the wine bar',
+    )
+    expect(getPhotoButton(container, 'Clear photo summary')).toBeTruthy()
+    expect(humanizeOfferOnDeviceMock).toHaveBeenLastCalledWith(rawOffer, {
+      typedIntent: '',
+      photoSummary: 'After-work spritz at the wine bar',
+    })
+    expect(container.textContent).toContain('Personalized for After-work spritz at the wine bar')
+
+    vi.useFakeTimers()
+
+    await click(getButtonByText(container, 'Not now'))
+
+    assertExactPaths(capturedRequests, [
+      '/offers/generate',
+      `/offers/${rawOffer.offer_id}/dismiss`,
+    ])
+    assertAllowedHosts(capturedRequests)
+    assertBodiesStayClean(capturedRequests)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000)
+    })
+
+    expect(container.textContent).toContain('Personalized for After-work spritz at the wine bar')
+    expect(getButtonByText(container, 'Claim Offer')).toBeTruthy()
+
+    vi.useRealTimers()
+
+    await click(getButtonByText(container, 'Claim Offer'))
+    await flushEffects()
+    await click(getButtonByText(container, 'Mark as Used'))
+    await flushEffects()
+
+    assertExactPaths(capturedRequests, [
+      '/offers/generate',
+      `/offers/${rawOffer.offer_id}/dismiss`,
+      `/offers/${rawOffer.offer_id}/claim`,
+      `/offers/${rawOffer.offer_id}/redeem`,
+    ])
+    assertAllowedHosts(capturedRequests)
+    assertBodiesStayClean(capturedRequests)
+  })
+
+  it('keeps combined typed, dictated, and photo context out of every captured request body', async () => {
+    const dictationSession = createFakeSpeechSession()
+    const speechRecognitionFactory = createSpeechRecognitionFactory({
+      sessions: [dictationSession],
+    })
+    const analyze = vi.fn().mockResolvedValue('After-work spritz at the wine bar')
+    const photoFactory = createPhotoFactory({ analyze })
+    const { container } = await mountUserView({ speechRecognitionFactory, photoFactory })
+
+    await typeInto(getIntentInput(container), 'Quiet patio coffee')
+    await click(getVoiceButton(container, 'Toggle voice intent'))
+
+    await act(async () => {
+      dictationSession.emitResult('After-work spritz')
+    })
+    await flushEffects()
+
+    await typeInto(getIntentInput(container), 'Quiet patio coffee + After-work spritz')
+    await selectPhoto(
+      container,
+      new File(['data:image/jpeg;base64,raw-image-bytes'], 'spritz.jpg', { type: 'image/jpeg' }),
+    )
+    await flushEffects()
+
+    expect(humanizeOfferOnDeviceMock).toHaveBeenLastCalledWith(rawOffer, {
+      typedIntent: 'Quiet patio coffee + After-work spritz',
+      photoSummary: 'After-work spritz at the wine bar',
+    })
+    expect(container.querySelector('[data-testid="photo-summary"]')?.textContent).toContain(
+      'After-work spritz at the wine bar',
+    )
+
+    await click(getButtonByText(container, 'Claim Offer'))
+    await flushEffects()
+    await click(getButtonByText(container, 'Mark as Used'))
+    await flushEffects()
+
+    assertExactPaths(capturedRequests, [
+      '/offers/generate',
+      `/offers/${rawOffer.offer_id}/claim`,
+      `/offers/${rawOffer.offer_id}/redeem`,
+    ])
+    assertAllowedHosts(capturedRequests)
+    assertBodiesStayClean(capturedRequests)
   })
 
   it('pins every captured lifecycle URL to the localhost host allow-list', async () => {

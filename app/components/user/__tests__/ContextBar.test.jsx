@@ -39,6 +39,10 @@ function mountContextBar(overrideProps = {}) {
     onReset: () => {},
     voiceState: 'supported-idle',
     onToggleListening: () => {},
+    photoState: 'supported-idle',
+    photoSummary: '',
+    onPhotoSelected: () => {},
+    onClearPhotoSummary: () => {},
     restrictedCategory: null,
     ...overrideProps,
   }
@@ -62,6 +66,26 @@ function mountContextBar(overrideProps = {}) {
 
 function queryVoiceButton(container, label) {
   return container.querySelector(`button[aria-label="${label}"]`)
+}
+
+function queryPhotoButton(container, label) {
+  return container.querySelector(`button[aria-label="${label}"]`)
+}
+
+function getPhotoInput(container) {
+  return container.querySelector('input[type="file"][accept="image/*"]')
+}
+
+function selectPhoto(container, file) {
+  const input = getPhotoInput(container)
+
+  act(() => {
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: [file],
+    })
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
 }
 
 afterEach(() => {
@@ -94,6 +118,7 @@ describe('ContextBar', () => {
     expect(input.maxLength).toBe(WALLET_INTENT_MAX)
     expect(toggle.textContent).toBe('AI mode')
     expect(status.textContent).toBe('AI')
+    expect(queryPhotoButton(container, 'Add photo context')).not.toBeNull()
     expect(reset).toBeNull()
   })
 
@@ -160,6 +185,60 @@ describe('ContextBar', () => {
     click(queryVoiceButton(container, 'Toggle voice intent'))
 
     expect(onToggleListening).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders photo controls for supported, analyzing, summary, and unsupported states', () => {
+    const { container, rerender } = mountContextBar({ photoState: 'supported-idle' })
+
+    const addButton = queryPhotoButton(container, 'Add photo context')
+    expect(addButton).not.toBeNull()
+    expect(addButton.disabled).toBe(false)
+
+    rerender({ photoState: 'analyzing' })
+
+    const analyzingButton = queryPhotoButton(container, 'Analyzing photo')
+    expect(analyzingButton).not.toBeNull()
+    expect(analyzingButton.disabled).toBe(true)
+    expect(analyzingButton.getAttribute('aria-disabled')).toBe('true')
+
+    rerender({ photoState: 'summary', photoSummary: 'quiet cafe window' })
+
+    const summaryButton = queryPhotoButton(container, 'Clear photo summary')
+    expect(summaryButton).not.toBeNull()
+    expect(summaryButton.disabled).toBe(false)
+    expect(container.querySelector('[data-testid="photo-summary"]')?.textContent).toContain('quiet cafe window')
+
+    rerender({ photoState: 'unsupported', photoSummary: '' })
+
+    const unsupportedButton = queryPhotoButton(container, 'Photo context unsupported')
+    expect(unsupportedButton).not.toBeNull()
+    expect(unsupportedButton.disabled).toBe(true)
+    expect(unsupportedButton.getAttribute('aria-disabled')).toBe('true')
+    expect(container.querySelector('[data-testid="photo-summary"]')).toBeNull()
+  })
+
+  it('passes selected photo files through the props-only callback', () => {
+    const onPhotoSelected = vi.fn()
+    const photo = new File(['image'], 'quiet-cafe.jpg', { type: 'image/jpeg' })
+    const { container } = mountContextBar({ onPhotoSelected, photoState: 'supported-idle' })
+
+    selectPhoto(container, photo)
+
+    expect(onPhotoSelected).toHaveBeenCalledWith(photo)
+  })
+
+  it('clears the photo summary from both the photo button and chip action', () => {
+    const onClearPhotoSummary = vi.fn()
+    const { container } = mountContextBar({
+      onClearPhotoSummary,
+      photoState: 'summary',
+      photoSummary: 'quiet cafe window',
+    })
+
+    click(queryPhotoButton(container, 'Clear photo summary'))
+    click(container.querySelector('button[aria-label="Remove photo summary"]'))
+
+    expect(onClearPhotoSummary).toHaveBeenCalledTimes(2)
   })
 
   it('renders the guardrail note only for restricted alcohol intents', () => {

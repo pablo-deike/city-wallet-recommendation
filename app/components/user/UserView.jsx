@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { C } from '../../constants'
 import { generateOffer, claimOffer, redeemOffer, dismissOffer } from '../../api'
 import { humanizeOfferOnDevice } from '../../lib/localPersonalization/index'
+import { mergeLocalText } from '../../lib/localPersonalization/mergeLocalText'
 import { classifyIntent } from '../../lib/localPersonalization/restrictedCategory'
+import { defaultPhotoFactory, normalizePhotoSummary } from '../../lib/photo/photoCapability'
 import {
   createSpeechRecognitionSession,
   detectSpeechRecognitionSupport,
@@ -65,28 +67,54 @@ function resolveSpeechRecognitionFactory(speechRecognitionFactory) {
   }
 }
 
-export default function UserView({ speechRecognitionFactory = defaultSpeechRecognitionFactory }) {
+function resolvePhotoFactory(photoFactory) {
+  try {
+    return photoFactory?.() ?? { supported: false }
+  } catch {
+    return { supported: false }
+  }
+}
+
+export default function UserView({
+  speechRecognitionFactory = defaultSpeechRecognitionFactory,
+  photoFactory = defaultPhotoFactory,
+}) {
   const [screen, setScreen] = useState('offer') // 'offer' | 'qr' | 'success' | 'dismissed'
   const [rawOffer, setRawOffer] = useState(null)
   const [qrData, setQrData] = useState(null)
   const [redeemResult, setRedeemResult] = useState(null)
   const [walletPreferences, setWalletPreferences] = useState(() => loadWalletPreferences())
   const [listening, setListening] = useState(false)
+  const [photoSummary, setPhotoSummary] = useState('')
+  const [analyzingPhoto, setAnalyzingPhoto] = useState(false)
   const sessionRef = useRef(null)
+  const photoSessionRef = useRef(null)
+  const photoAnalysisIdRef = useRef(0)
 
   const speechRecognition = useMemo(
     () => resolveSpeechRecognitionFactory(speechRecognitionFactory),
     [speechRecognitionFactory],
   )
+  const photo = useMemo(() => resolvePhotoFactory(photoFactory), [photoFactory])
 
   const mode = walletPreferences.mode
   const typedIntent = walletPreferences.typedIntent
-  const restrictedCategory = useMemo(() => classifyIntent(typedIntent), [typedIntent])
+  const restrictedCategory = useMemo(
+    () => classifyIntent(mergeLocalText({ typedIntent, photoSummary })),
+    [typedIntent, photoSummary],
+  )
   const voiceState = !speechRecognition.supported
     ? 'unsupported'
     : listening
       ? 'listening'
       : 'supported-idle'
+  const photoState = !photo.supported
+    ? 'unsupported'
+    : analyzingPhoto
+      ? 'analyzing'
+      : photoSummary
+        ? 'summary'
+        : 'supported-idle'
 
   const displayOffer = useMemo(() => {
     if (!rawOffer) {
@@ -97,8 +125,8 @@ export default function UserView({ speechRecognitionFactory = defaultSpeechRecog
       return buildOffDisplayOffer(rawOffer)
     }
 
-    return humanizeOfferOnDevice(rawOffer, { typedIntent })
-  }, [mode, rawOffer, typedIntent])
+    return humanizeOfferOnDevice(rawOffer, { typedIntent, photoSummary })
+  }, [mode, rawOffer, typedIntent, photoSummary])
 
   const personalizationStatus = mode === 'off'
     ? 'off'
@@ -141,9 +169,12 @@ export default function UserView({ speechRecognitionFactory = defaultSpeechRecog
   useEffect(() => {
     return () => {
       const activeSession = sessionRef.current
+      const activePhotoSession = photoSessionRef.current
       sessionRef.current = null
+      photoSessionRef.current = null
       activeSession?.stop?.()
       activeSession?.dispose?.()
+      activePhotoSession?.dispose?.()
     }
   }, [])
 
@@ -221,6 +252,53 @@ export default function UserView({ speechRecognitionFactory = defaultSpeechRecog
       session?.dispose?.()
       setListening(false)
     }
+  }
+
+  async function handlePhotoSelected(file) {
+    if (!file || !photo.supported || typeof photo.createSession !== 'function') {
+      setAnalyzingPhoto(false)
+      return
+    }
+
+    const analysisId = photoAnalysisIdRef.current + 1
+    photoAnalysisIdRef.current = analysisId
+    let session = null
+
+    setAnalyzingPhoto(true)
+    setPhotoSummary('')
+
+    try {
+      session = photo.createSession()
+      photoSessionRef.current = session
+      const nextPhotoSummary = normalizePhotoSummary(await session.analyze(file))
+
+      if (photoAnalysisIdRef.current === analysisId) {
+        setPhotoSummary(nextPhotoSummary)
+      }
+    } catch {
+      if (photoAnalysisIdRef.current === analysisId) {
+        setPhotoSummary('')
+      }
+    } finally {
+      if (photoSessionRef.current === session) {
+        photoSessionRef.current = null
+      }
+
+      session?.dispose?.()
+
+      if (photoAnalysisIdRef.current === analysisId) {
+        setAnalyzingPhoto(false)
+      }
+    }
+  }
+
+  function handleClearPhotoSummary() {
+    photoAnalysisIdRef.current += 1
+    const activePhotoSession = photoSessionRef.current
+    photoSessionRef.current = null
+    activePhotoSession?.dispose?.()
+    setAnalyzingPhoto(false)
+    setPhotoSummary('')
   }
 
   async function handleClaim() {
@@ -308,6 +386,10 @@ export default function UserView({ speechRecognitionFactory = defaultSpeechRecog
         onReset={handleResetPreferences}
         voiceState={voiceState}
         onToggleListening={handleToggleListening}
+        photoState={photoState}
+        photoSummary={photoSummary}
+        onPhotoSelected={handlePhotoSelected}
+        onClearPhotoSummary={handleClearPhotoSummary}
         restrictedCategory={restrictedCategory}
       />
 

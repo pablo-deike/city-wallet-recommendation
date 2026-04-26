@@ -1,3 +1,4 @@
+import { useRef } from 'react'
 import { C } from '../../constants'
 import { WALLET_INTENT_MAX } from '../../lib/walletPreferences'
 
@@ -72,8 +73,13 @@ export default function ContextBar({
   onReset = () => {},
   voiceState = 'supported-idle',
   onToggleListening = () => {},
+  photoState = 'unsupported',
+  photoSummary = '',
+  onPhotoSelected = () => {},
+  onClearPhotoSummary = () => {},
   restrictedCategory = null,
 }) {
+  const photoInputRef = useRef(null)
   const isDirty = mode !== 'ai' || typedIntent.length > 0
   const nextMode = mode === 'ai' ? 'off' : 'ai'
   const statusPresentation = getStatusPresentation(status, fallbackReason)
@@ -84,6 +90,37 @@ export default function ContextBar({
     : isVoiceUnsupported
       ? 'Voice intent unsupported'
       : 'Toggle voice intent'
+  const isPhotoUnsupported = photoState === 'unsupported'
+  const isAnalyzingPhoto = photoState === 'analyzing'
+  const hasPhotoSummary = photoState === 'summary' && Boolean(photoSummary)
+  const photoLabel = hasPhotoSummary
+    ? 'Clear photo summary'
+    : isAnalyzingPhoto
+      ? 'Analyzing photo'
+      : isPhotoUnsupported
+        ? 'Photo context unsupported'
+        : 'Add photo context'
+
+  function handlePhotoButtonClick() {
+    if (hasPhotoSummary) {
+      onClearPhotoSummary()
+      return
+    }
+
+    if (!isPhotoUnsupported && !isAnalyzingPhoto) {
+      photoInputRef.current?.click()
+    }
+  }
+
+  function handlePhotoInputChange(event) {
+    const [file] = Array.from(event.target.files ?? [])
+
+    if (file) {
+      onPhotoSelected(file)
+    }
+
+    event.target.value = ''
+  }
 
   return (
     <div style={{ padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -178,6 +215,52 @@ export default function ContextBar({
           >
             {isVoiceUnsupported ? '🚫' : '🎙️'}
           </button>
+
+          <input
+            ref={photoInputRef}
+            type="file"
+            accept="image/*"
+            aria-hidden="true"
+            tabIndex={-1}
+            onChange={handlePhotoInputChange}
+            style={{ display: 'none' }}
+          />
+          <button
+            type="button"
+            aria-label={photoLabel}
+            aria-disabled={isPhotoUnsupported || isAnalyzingPhoto ? 'true' : undefined}
+            disabled={isPhotoUnsupported || isAnalyzingPhoto}
+            onClick={handlePhotoButtonClick}
+            style={{
+              border: 'none',
+              borderRadius: 14,
+              padding: '9px 11px',
+              minWidth: 42,
+              background: isPhotoUnsupported
+                ? 'rgba(107, 114, 128, 0.14)'
+                : hasPhotoSummary
+                  ? C.navy
+                  : isAnalyzingPhoto
+                    ? 'rgba(245, 166, 35, 0.3)'
+                    : 'rgba(245, 166, 35, 0.18)',
+              color: isPhotoUnsupported
+                ? C.gray
+                : hasPhotoSummary
+                  ? 'white'
+                  : C.navy,
+              fontSize: 16,
+              fontWeight: 800,
+              cursor: isPhotoUnsupported || isAnalyzingPhoto ? 'not-allowed' : 'pointer',
+              boxShadow: isPhotoUnsupported
+                ? 'inset 0 0 0 1px rgba(107,114,128,0.18)'
+                : hasPhotoSummary
+                  ? '0 4px 12px rgba(27,42,74,0.18)'
+                  : 'inset 0 0 0 1px rgba(245,166,35,0.18)',
+              flexShrink: 0,
+            }}
+          >
+            {isPhotoUnsupported ? '🚫' : isAnalyzingPhoto ? '…' : '📷'}
+          </button>
         </div>
 
         <span
@@ -221,6 +304,37 @@ export default function ContextBar({
           </button>
         ) : null}
       </div>
+
+      {hasPhotoSummary ? (
+        <span
+          data-testid="photo-summary"
+          style={{
+            ...chipStyle,
+            alignSelf: 'flex-start',
+            maxWidth: '100%',
+            whiteSpace: 'normal',
+          }}
+        >
+          <span>📷 {photoSummary}</span>
+          <button
+            type="button"
+            aria-label="Remove photo summary"
+            onClick={onClearPhotoSummary}
+            style={{
+              border: 'none',
+              background: 'transparent',
+              color: C.gray,
+              cursor: 'pointer',
+              fontSize: 14,
+              fontWeight: 900,
+              lineHeight: 1,
+              padding: '0 0 0 2px',
+            }}
+          >
+            ×
+          </button>
+        </span>
+      ) : null}
 
       {restrictedCategory?.category === 'alcohol' ? (
         <div

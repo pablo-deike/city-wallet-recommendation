@@ -6,8 +6,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest",
-    "test:run": "vitest run"
+    "test": "node scripts/run-vitest.mjs",
+    "test:run": "node scripts/run-vitest.mjs run"
   },
   "dependencies": {
     "react": "^18.3.1",

@@ -167,9 +167,47 @@ function getVoiceButton(container, label) {
   return container.querySelector(`button[aria-label="${label}"]`)
 }
 
+function getPhotoButton(container, label) {
+  return container.querySelector(`button[aria-label="${label}"]`)
+}
+
+function getPhotoInput(container) {
+  return container.querySelector('input[type="file"][accept="image/*"]')
+}
+
+async function selectPhoto(container, file) {
+  const input = getPhotoInput(container)
+
+  await act(async () => {
+    Object.defineProperty(input, 'files', {
+      configurable: true,
+      value: [file],
+    })
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+}
+
+function createPhotoFactory({ supported = true, analyze } = {}) {
+  if (!supported) {
+    return vi.fn(() => ({ supported: false }))
+  }
+
+  return vi.fn(() => ({
+    supported: true,
+    createSession: vi.fn(() => ({
+      analyze,
+      dispose: vi.fn(),
+    })),
+  }))
+}
+
 function readPersistedIntent() {
   const storedIntent = localStorage.getItem('cw.wallet.intent')
   return storedIntent == null ? null : JSON.parse(storedIntent)
+}
+
+function readAllWalletStorage() {
+  return JSON.stringify({ ...localStorage })
 }
 
 function getGuardrail(container) {
@@ -179,22 +217,26 @@ function getGuardrail(container) {
 beforeEach(() => {
   clearWalletPreferences()
   humanizeOfferOnDeviceMock.mockReset()
-  humanizeOfferOnDeviceMock.mockImplementation((offer, localContext = {}) => ({
-    ...offer,
-    headline: localContext.typedIntent
-      ? `Personalized for ${localContext.typedIntent}`
-      : 'Personalized default headline',
-    reason: localContext.typedIntent
-      ? `Reason for ${localContext.typedIntent}`
-      : 'Reason with no typed intent',
-    emoji: '✨',
-    local_personalization: {
-      source: 'local-runtime',
-      status: 'ai',
-      fallbackReason: null,
-      runtime: 'window-ai',
-    },
-  }))
+  humanizeOfferOnDeviceMock.mockImplementation((offer, localContext = {}) => {
+    const localLabel = [localContext.typedIntent, localContext.photoSummary].filter(Boolean).join(' + ')
+
+    return {
+      ...offer,
+      headline: localLabel
+        ? `Personalized for ${localLabel}`
+        : 'Personalized default headline',
+      reason: localLabel
+        ? `Reason for ${localLabel}`
+        : 'Reason with no typed intent',
+      emoji: '✨',
+      local_personalization: {
+        source: 'local-runtime',
+        status: 'ai',
+        fallbackReason: null,
+        runtime: 'window-ai',
+      },
+    }
+  })
   vi.stubGlobal('fetch', createFetchStub())
 })
 
@@ -219,7 +261,10 @@ describe('UserView', () => {
   it('defaults to ai mode and renders adapter-personalized offer text', async () => {
     const { container } = await mountUserView()
 
-    expect(humanizeOfferOnDeviceMock).toHaveBeenCalledWith(rawOffer, { typedIntent: '' })
+    expect(humanizeOfferOnDeviceMock).toHaveBeenCalledWith(rawOffer, {
+      typedIntent: '',
+      photoSummary: '',
+    })
     expect(container.textContent).toContain('Personalized default headline')
     expect(getToggleButton(container).textContent).toBe('AI mode')
     expect(getStatus(container).textContent).toBe('AI')
@@ -249,6 +294,7 @@ describe('UserView', () => {
 
     expect(humanizeOfferOnDeviceMock).toHaveBeenLastCalledWith(rawOffer, {
       typedIntent: 'Quiet patio coffee',
+      photoSummary: '',
     })
     expect(container.textContent).toContain('Personalized for Quiet patio coffee')
 
@@ -260,6 +306,88 @@ describe('UserView', () => {
 
     expect(requestBody).not.toHaveProperty('typedIntent')
     expect(JSON.stringify(requestBody)).not.toContain('Quiet patio coffee')
+  })
+
+  it('commits normalized photo summaries through the adapter context only', async () => {
+    const analyze = vi.fn().mockResolvedValue('  <quiet> cafe window\nseat  ')
+    const photoFactory = createPhotoFactory({ analyze })
+    const photo = new File(['raw-bytes'], 'receipt.jpg', { type: 'image/jpeg' })
+    const { container } = await mountUserView({ photoFactory })
+
+    await selectPhoto(container, photo)
+    await flushEffects()
+
+    expect(analyze).toHaveBeenCalledWith(photo)
+    expect(container.querySelector('[data-testid="photo-summary"]')?.textContent).toContain('quiet cafe window seat')
+    expect(humanizeOfferOnDeviceMock).toHaveBeenLastCalledWith(rawOffer, {
+      typedIntent: '',
+      photoSummary: 'quiet cafe window seat',
+    })
+    expect(container.textContent).toContain('Personalized for quiet cafe window seat')
+    expect(readAllWalletStorage()).not.toContain('photo')
+    expect(readAllWalletStorage()).not.toContain('receipt.jpg')
+    expect(readAllWalletStorage()).not.toContain('raw-bytes')
+  })
+
+  it('renders an honest disabled photo button when photo analysis is unsupported', async () => {
+    const photoFactory = createPhotoFactory({ supported: false })
+    const { container } = await mountUserView({ photoFactory })
+
+    const unsupportedButton = getPhotoButton(container, 'Photo context unsupported')
+
+    expect(unsupportedButton).toBeTruthy()
+    expect(unsupportedButton.disabled).toBe(true)
+    expect(unsupportedButton.getAttribute('aria-disabled')).toBe('true')
+    expect(container.querySelector('[data-testid="photo-summary"]')).toBeNull()
+  })
+
+  it('returns to supported-idle without a fake summary when photo analysis throws', async () => {
+    const analyze = vi.fn().mockRejectedValue(new Error('local analyzer failed'))
+    const photoFactory = createPhotoFactory({ analyze })
+    const { container } = await mountUserView({ photoFactory })
+
+    await selectPhoto(container, new File(['image'], 'patio.png', { type: 'image/png' }))
+    await flushEffects()
+
+    expect(getPhotoButton(container, 'Add photo context')).toBeTruthy()
+    expect(container.querySelector('[data-testid="photo-summary"]')).toBeNull()
+    expect(humanizeOfferOnDeviceMock).toHaveBeenLastCalledWith(rawOffer, {
+      typedIntent: '',
+      photoSummary: '',
+    })
+  })
+
+  it('surfaces the existing alcohol guardrail for photo-only local text', async () => {
+    const photoFactory = createPhotoFactory({
+      analyze: vi.fn().mockResolvedValue('after-work spritz poster'),
+    })
+    const { container } = await mountUserView({ photoFactory })
+
+    await selectPhoto(container, new File(['image'], 'poster.png', { type: 'image/png' }))
+    await flushEffects()
+
+    expect(getGuardrail(container)?.textContent).toBe("Demo: please drink responsibly. We don't verify age.")
+  })
+
+  it('clearing a photo summary removes it from the next humanizer call', async () => {
+    const photoFactory = createPhotoFactory({
+      analyze: vi.fn().mockResolvedValue('quiet bakery window'),
+    })
+    const { container } = await mountUserView({ photoFactory })
+
+    await selectPhoto(container, new File(['image'], 'bakery.png', { type: 'image/png' }))
+    await flushEffects()
+
+    expect(container.querySelector('[data-testid="photo-summary"]')).toBeTruthy()
+
+    await click(getPhotoButton(container, 'Clear photo summary'))
+    await flushEffects()
+
+    expect(container.querySelector('[data-testid="photo-summary"]')).toBeNull()
+    expect(humanizeOfferOnDeviceMock).toHaveBeenLastCalledWith(rawOffer, {
+      typedIntent: '',
+      photoSummary: '',
+    })
   })
 
   it('commits dictated transcripts through the existing typed-intent path and returns to idle on end', async () => {
@@ -282,6 +410,7 @@ describe('UserView', () => {
     expect(readPersistedIntent()).toBe('Quiet patio coffee')
     expect(humanizeOfferOnDeviceMock).toHaveBeenLastCalledWith(rawOffer, {
       typedIntent: 'Quiet patio coffee',
+      photoSummary: '',
     })
     expect(container.textContent).toContain('Personalized for Quiet patio coffee')
 
