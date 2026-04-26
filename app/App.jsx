@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { History, Compass, Heart, Wallet, User } from 'lucide-react'
+import { Compass, Wallet } from 'lucide-react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { generateOffer, claimOffer, redeemOffer, dismissOffer, getUserWallet } from './api'
@@ -11,7 +11,6 @@ const MERCHANT_COORDS = {
   pizza_place:  { lat: 52.5210, lon: 13.4060 },
 }
 const DEFAULT_LOC = { lat: 52.5185, lon: 13.4010 }
-const AVATAR_URL  = 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=100&h=100'
 const COFFEE_IMG  = 'https://images.unsplash.com/photo-1541167760496-162955ed8a9f?auto=format&fit=crop&q=80&w=600'
 
 // ── QR grid (static fake QR) ──────────────────────────────────────────────────
@@ -172,14 +171,8 @@ export default function App() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f5f7fb' }}>
 
       {/* Header */}
-      <header style={{ position: 'sticky', top: 0, zIndex: 2000, display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 20px', background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderBottom: '1px solid #dbe3ef' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <img src={AVATAR_URL} alt="User" style={{ width: 36, height: 36, borderRadius: '50%', objectFit: 'cover', border: '1px solid #dbe3ef' }} />
-          <span style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.4px', color: '#111827' }}>Voucher</span>
-        </div>
-        <button style={{ padding: 8, borderRadius: '50%', background: 'none', border: 'none', cursor: 'pointer', color: '#6b7280', display: 'flex' }}>
-          <History size={24} />
-        </button>
+      <header style={{ position: 'sticky', top: 0, zIndex: 2000, display: 'flex', alignItems: 'center', padding: '12px 20px', background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderBottom: '1px solid #dbe3ef' }}>
+        <span style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.4px', color: '#111827' }}>💳 City Wallet</span>
       </header>
 
       {/* Main */}
@@ -307,17 +300,12 @@ export default function App() {
           </div>
         )}
 
-        {(subTab === 'saved' || subTab === 'account') && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#9ca3af', fontSize: 15, fontWeight: 600 }}>
-            {subTab === 'saved' ? 'Saved offers coming soon' : 'Account coming soon'}
-          </div>
-        )}
       </main>
 
       {/* Bottom nav */}
       <nav style={{ borderTop: '1px solid #dbe3ef', background: '#ffffff', paddingTop: 8, paddingBottom: 14, flexShrink: 0, zIndex: 2000, position: 'relative' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', padding: '0 8px' }}>
-          {[{ key: 'explore', Icon: Compass, label: 'Explore' }, { key: 'saved', Icon: Heart, label: 'Saved' }, { key: 'wallet', Icon: Wallet, label: 'Wallet' }, { key: 'account', Icon: User, label: 'Account' }].map(({ key, Icon, label }) => (
+          {[{ key: 'explore', Icon: Compass, label: 'Explore' }, { key: 'wallet', Icon: Wallet, label: 'Wallet' }].map(({ key, Icon, label }) => (
             <button key={key} onClick={() => setSubTab(key)} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, padding: '4px 12px', background: 'none', border: 'none', cursor: 'pointer', color: subTab === key ? '#111827' : '#9ca3af', transition: 'color 0.15s' }}>
               <Icon size={24} />
               <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.04em' }}>{label}</span>
