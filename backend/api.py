@@ -6,6 +6,8 @@ import sqlite3
 import uuid
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
+import httpx
+import asyncio
 
 from fastapi import FastAPI, HTTPException, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,14 +21,21 @@ from backend.rules import (
     SpecialOffer,
     SpecialOfferCreate,
     SpecialOfferUpdate,
+    AutoOfferInstance,
+    AutoOfferCreate,
     AUTO_RULE_METADATA,
     AUTO_RULE_DEFAULTS,
     auto_rules_db,
     special_offers_db,
+    auto_offers_db,
     get_merchant_auto_rules,
     get_merchant_special_offers,
+    get_merchant_auto_offers,
+    get_merchant_auto_offers_by_type,
     create_default_auto_rules,
 )
+
+from src.backend import db as google_db
 
 app = FastAPI(title="City Wallet API")
 
@@ -48,7 +57,9 @@ CREATE TABLE IF NOT EXISTS merchants (
     lon REAL,
     max_discount INTEGER,
     quiet_threshold INTEGER,
-    offer_duration INTEGER
+    offer_duration INTEGER,
+    place_id TEXT,
+    address TEXT
 )
 """)
 
@@ -83,6 +94,20 @@ CREATE TABLE IF NOT EXISTS merchant_stats (
     offers_accepted INTEGER DEFAULT 0,
     cashback_issued REAL DEFAULT 0.0,
     FOREIGN KEY(merchant_id) REFERENCES merchants(merchant_id)
+)
+""")
+
+cursor.execute("""
+CREATE TABLE IF NOT EXISTS auto_offers (
+    offer_id TEXT PRIMARY KEY,
+    merchant_id TEXT,
+    rule_type TEXT,
+    discount_percent INTEGER,
+    trigger_config TEXT,
+    offer_duration_minutes INTEGER,
+    product_name TEXT,
+    created_at TEXT,
+    updated_at TEXT
 )
 """)
 
@@ -131,6 +156,23 @@ class CreateMerchantPayload(BaseModel):
     max_discount: int = 20
     quiet_threshold: int = 5
     offer_duration: int = 15
+
+
+class MerchantClaimPayload(BaseModel):
+    place_id: str
+    name: str
+    lat: float
+    lon: float
+    address: str = ""
+    merchant_id: str
+
+
+class SearchMerchantsPayload(BaseModel):
+    query: str
+    lat: float
+    lon: float
+    radius: int = 5000
+
 
 PUBLIC_API_BASE_URL = os.environ.get("PUBLIC_API_BASE_URL", "http://localhost:8000")
 
@@ -204,9 +246,9 @@ def get_place_image(merchant_id: str, lat: float, lon: float):
 cursor.execute("SELECT COUNT(*) FROM merchants")
 if cursor.fetchone()[0] == 0:
     cursor.execute("""
-    INSERT INTO merchants (merchant_id, name, lat, lon, max_discount, quiet_threshold, offer_duration)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, ("cafe_mueller", "Café Müller", 52.5200, 13.4050, 20, 5, 15))
+    INSERT INTO merchants (merchant_id, name, lat, lon, max_discount, quiet_threshold, offer_duration, place_id, address)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, ("cafe_mueller", "Café Müller", 52.5200, 13.4050, 20, 5, 15, None, None))
     cursor.execute("""
     INSERT INTO merchant_stats (merchant_id, offers_sent, offers_accepted, cashback_issued)
     VALUES (?, 0, 0, 0.0)
@@ -780,6 +822,96 @@ def delete_special_offer(merchant_id: str, offer_id: str):
     return {"success": True, "deleted": offer_id}
 
 
+@app.get("/merchant/{merchant_id}/auto-offers")
+def get_auto_offers(merchant_id: str):
+    if not merchant_exists(merchant_id):
+        return {"error": f"Merchant {merchant_id} not found"}
+
+    cursor.execute(
+        "SELECT offer_id, rule_type, discount_percent, trigger_config, offer_duration_minutes, product_name, created_at, updated_at FROM auto_offers WHERE merchant_id = ?",
+        (merchant_id,)
+    )
+    rows = cursor.fetchall()
+
+    offers_data = []
+    for row in rows:
+        offer_id, rule_type, discount_percent, trigger_config_json, offer_duration_minutes, product_name, created_at, updated_at = row
+        meta = AUTO_RULE_METADATA.get(AutoRuleType(rule_type), {})
+        offers_data.append({
+            "offer_id": offer_id,
+            "rule_type": rule_type,
+            "rule_name": meta.get("name", rule_type),
+            "discount_percent": discount_percent,
+            "trigger_config": json.loads(trigger_config_json) if trigger_config_json else {},
+            "offer_duration_minutes": offer_duration_minutes or 30,
+            "product_name": product_name,
+            "created_at": created_at,
+            "updated_at": updated_at,
+        })
+
+    return {"merchant_id": merchant_id, "offers": offers_data}
+
+
+@app.post("/merchant/{merchant_id}/auto-offers")
+def create_auto_offer(merchant_id: str, body: AutoOfferCreate):
+    if not merchant_exists(merchant_id):
+        return {"error": f"Merchant {merchant_id} not found"}
+
+    import json as json_module
+    offer_id = f"autooffer_{merchant_id}_{body.rule_type.value}_{uuid.uuid4().hex[:8]}"
+    now = datetime.now()
+    now_iso = now.isoformat()
+
+    cursor.execute(
+        "INSERT INTO auto_offers (offer_id, merchant_id, rule_type, discount_percent, trigger_config, offer_duration_minutes, product_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        (
+            offer_id,
+            merchant_id,
+            body.rule_type.value,
+            body.discount_percent,
+            json_module.dumps(body.trigger_config),
+            body.offer_duration_minutes or 30,
+            body.product_name,
+            now_iso,
+            now_iso,
+        ),
+    )
+    conn.commit()
+
+    meta = AUTO_RULE_METADATA.get(body.rule_type, {})
+    return {
+        "success": True,
+        "offer": {
+            "offer_id": offer_id,
+            "rule_type": body.rule_type.value,
+            "rule_name": meta.get("name", body.rule_type.value),
+            "discount_percent": body.discount_percent,
+            "trigger_config": body.trigger_config,
+            "offer_duration_minutes": body.offer_duration_minutes or 30,
+            "product_name": body.product_name,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        },
+    }
+
+
+@app.delete("/merchant/{merchant_id}/auto-offers/{offer_id}")
+def delete_auto_offer(merchant_id: str, offer_id: str):
+    cursor.execute("SELECT merchant_id FROM auto_offers WHERE offer_id = ?", (offer_id,))
+    row = cursor.fetchone()
+
+    if not row:
+        return {"error": f"Offer {offer_id} not found"}
+
+    if row[0] != merchant_id:
+        return {"error": f"Offer {offer_id} does not belong to merchant {merchant_id}"}
+
+    cursor.execute("DELETE FROM auto_offers WHERE offer_id = ?", (offer_id,))
+    conn.commit()
+
+    return {"success": True, "deleted": offer_id}
+
+
 @app.get("/auto-rules/types")
 def get_auto_rule_types():
     types_data = []
@@ -796,3 +928,91 @@ def get_auto_rule_types():
         })
 
     return {"rule_types": types_data}
+
+
+@app.get("/api/merchants/nearby")
+def get_nearby_merchants(lat: float, lon: float, radius_km: float = 1.0):
+    try:
+        google_db.init_db()
+        df = google_db.filter_merchants_by_distance(lat, lon, radius_km)
+        df = df.sort("distance_km")
+        merchants = []
+        for row in df.to_dicts():
+            merchants.append({
+                "place_id": row.get("place_id"),
+                "name": row.get("name"),
+                "lat": row.get("lat"),
+                "lon": row.get("lon"),
+                "address": row.get("address"),
+                "distance_km": round(row.get("distance_km", 0), 2),
+                "rating": row.get("rating"),
+                "types": row.get("types", []),
+                "primary_type": row.get("primary_type"),
+            })
+        return {"count": len(merchants), "merchants": merchants}
+    except Exception as e:
+        return {"count": 0, "merchants": [], "error": str(e)}
+
+
+@app.post("/api/merchants/search")
+async def search_merchants(body: SearchMerchantsPayload):
+    api_key = os.environ.get("GOOGLE_PLACES_WEATHER_API_KEY") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return {"count": 0, "places": [], "error": "No API key configured"}
+
+    url = "https://places.googleapis.com/v1/places:searchText"
+    headers = {
+        "X-Goog-Api-Key": api_key,
+        "X-Goog-FieldMask": "places.id,places.displayName,places.location,places.formattedAddress,places.types,places.rating",
+        "Content-Type": "application/json",
+    }
+    body_json = {
+        "textQuery": body.query,
+        "locationBias": {
+            "circle": {
+                "center": {"latitude": body.lat, "longitude": body.lon},
+                "radius": body.radius,
+            }
+        },
+        "maxResultCount": 20,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(url, headers=headers, json=body_json)
+            data = resp.json()
+            places = data.get("places", [])
+            results = []
+            for p in places:
+                loc = p.get("location", {})
+                results.append({
+                    "place_id": p.get("id"),
+                    "name": p.get("displayName", {}).get("text", ""),
+                    "lat": loc.get("latitude"),
+                    "lon": loc.get("longitude"),
+                    "address": p.get("formattedAddress", ""),
+                    "types": p.get("types", []),
+                    "rating": p.get("rating"),
+                })
+            return {"count": len(results), "places": results}
+    except Exception as e:
+        return {"count": 0, "places": [], "error": str(e)}
+
+
+@app.post("/api/merchants/claim")
+def claim_merchant_place(body: MerchantClaimPayload):
+    if not merchant_exists(body.merchant_id):
+        return {"error": f"Merchant {body.merchant_id} not found"}
+
+    cursor.execute("""
+    UPDATE merchants SET place_id = ?, name = ?, lat = ?, lon = ?, address = ?
+    WHERE merchant_id = ?
+    """, (body.place_id, body.name, body.lat, body.lon, body.address, body.merchant_id))
+    conn.commit()
+
+    return {
+        "success": True,
+        "merchant_id": body.merchant_id,
+        "place_id": body.place_id,
+        "name": body.name,
+    }

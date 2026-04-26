@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
-import { getMerchantStats, getAutoRules, updateAutoRule, getSpecialOffers, createSpecialOffer, deleteSpecialOffer } from './api'
+import { getMerchantStats, getAutoOffers, createAutoOffer, deleteAutoOffer, getSpecialOffers, createSpecialOffer, deleteSpecialOffer, searchMerchants, claimMerchantPlace } from './api'
 import vicoLogo from './images/vico-logo.svg'
+import { Search, Check, X, MapPin } from 'lucide-react'
 
 const C = {
   text: '#111827',
@@ -70,39 +71,64 @@ function ProductInput({ products, onAdd, onUpdate, onRemove, label }) {
   )
 }
 
-function RuleCard({ ruleType, title, description, expanded, onToggleExpand, enabled, onToggleEnabled, activeSummary, children }) {
+function RuleCard({ ruleType, title, description, expanded, onToggleExpand, children, offers = [], onDeleteOffer }) {
   return (
     <div style={{ background: C.elevated, borderRadius: 12, border: `1px solid ${C.border}`, overflow: 'hidden' }}>
       <div onClick={onToggleExpand} style={{ padding: '12px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}>
         <div style={{ flex: 1 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{title}</span>
-            {activeSummary && !expanded && (
-              <span style={{ background: '#dcfce7', border: '1px solid #86efac', color: '#15803d', borderRadius: 999, padding: '2px 8px', fontSize: 10, fontWeight: 700 }}>{activeSummary}</span>
+            {offers.length > 0 && !expanded && (
+              <span style={{ background: '#dcfce7', border: '1px solid #86efac', color: '#15803d', borderRadius: 999, padding: '2px 8px', fontSize: 10, fontWeight: 700 }}>{offers.length} active</span>
             )}
           </div>
           <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{description}</div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <button onClick={e => { e.stopPropagation(); onToggleEnabled() }} style={{ width: 44, height: 24, borderRadius: 12, border: 'none', background: enabled ? C.accent : '#e5e7eb', cursor: 'pointer', position: 'relative' }}>
-            <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'white', position: 'absolute', top: 2, left: enabled ? 22 : 2, boxShadow: '0 1px 3px rgba(0,0,0,0.2)', transition: 'left 0.15s' }} />
-          </button>
-          <div style={{ fontSize: 16, color: C.muted, transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>^</div>
-        </div>
+        <div style={{ fontSize: 16, color: C.muted, transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)', transition: 'transform 0.2s' }}>^</div>
       </div>
       {expanded && (
         <div style={{ padding: '0 14px 14px', borderTop: `1px solid ${C.border}` }}>
           {children}
+          {offers.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, fontWeight: 600, color: C.muted, marginBottom: 8 }}>Active Offers ({offers.length})</div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {offers.map(offer => (
+                  <div key={offer.offer_id} style={{ background: '#ffffff', borderRadius: 8, border: `1px solid ${C.border}`, padding: '8px 10px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span style={{ fontSize: 14, fontWeight: 800, color: C.accent }}>{offer.discount_percent}%</span>
+                      <span style={{ fontSize: 11, color: C.muted }}>
+                        {offer.offer_duration_minutes}min
+                        {offer.product_name && ` · ${offer.product_name}`}
+                        {offer.trigger_config && offer.trigger_config.visit_count && ` · every ${offer.trigger_config.visit_count} visits`}
+                        {offer.trigger_config && offer.trigger_config.density_threshold && ` · <${offer.trigger_config.density_threshold}/hr`}
+                      </span>
+                    </div>
+                    <button onClick={() => onDeleteOffer(offer.offer_id)} style={{ background: 'transparent', border: 'none', color: '#ef4444', fontSize: 11, fontWeight: 600, cursor: 'pointer' }}>Delete</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
   )
 }
 
+function OfferSummary({ offer }) {
+  let summary = `${offer.discount_percent}% off`
+  if (offer.trigger_config) {
+    if (offer.trigger_config.visit_count) summary = `Every ${offer.trigger_config.visit_count} visits: ${offer.discount_percent}%`
+    if (offer.trigger_config.density_threshold) summary = `${offer.discount_percent}% (<${offer.trigger_config.density_threshold}/hr)`
+  }
+  return summary
+}
+
 export default function MerchantView({ onBack }) {
   const [activeTab, setActiveTab] = useState('rules')
   const [showModal, setShowModal] = useState(null)
-  const [autoRules, setAutoRules] = useState(null)
+  const [autoOffers, setAutoOffers] = useState([])
   const [specialOffers, setSpecialOffers] = useState(null)
   const [stats, setStats] = useState(null)
   const [confirmToast, setConfirmToast] = useState(null)
@@ -114,11 +140,13 @@ export default function MerchantView({ onBack }) {
   const [coldProducts, setColdProducts] = useState([''])
   const [rainProducts, setRainProducts] = useState([''])
   const [hotProducts, setHotProducts] = useState([''])
+  const [firstVisitProduct, setFirstVisitProduct] = useState('')
   const [loyaltyVisitCount, setLoyaltyVisitCount] = useState(5)
   const [loyaltyDiscount, setLoyaltyDiscount] = useState(15)
   const [firstVisitDiscount, setFirstVisitDiscount] = useState(10)
   const [quietDiscount, setQuietDiscount] = useState(15)
   const [quietThreshold, setQuietThreshold] = useState(5)
+  const [quietProduct, setQuietProduct] = useState('')
   const [coldEnabled, setColdEnabled] = useState(false)
   const [coldTemp, setColdTemp] = useState(5)
   const [coldDiscount, setColdDiscount] = useState(10)
@@ -133,41 +161,23 @@ export default function MerchantView({ onBack }) {
 
   const [newOffer, setNewOffer] = useState({ title: '', description: '', discount_percent: 15, product_category: 'coffee', product_name: '' })
 
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [claimedLocation, setClaimedLocation] = useState(null)
+  const [userCoords, setUserCoords] = useState({ lat: 48.1351, lon: 11.5820 })
+
   useEffect(() => {
     getMerchantStats().then(setStats).catch(() => {})
-    getAutoRules().then(data => {
-      const rules = data?.rules ?? []
-      setAutoRules(rules)
-      rules.forEach(r => {
-        if (r.rule_type === 'loyalty_reward') {
-          setLoyaltyVisitCount(r.trigger_config?.visit_count || 5)
-          setLoyaltyDiscount(r.discount_percent || 15)
-          if (r.trigger_config?.reward_product) {
-            setLoyaltyProducts(r.trigger_config.reward_product.split(', ').filter(p => p))
-          }
-        }
-        if (r.rule_type === 'first_visit') setFirstVisitDiscount(r.discount_percent || 10)
-        if (r.rule_type === 'quiet_hour') {
-          setQuietDiscount(r.discount_percent || 15)
-          setQuietThreshold(r.trigger_config?.density_threshold || 5)
-        }
-        if (r.rule_type === 'weather_match') {
-          setColdEnabled(r.trigger_config?.cold_enabled || false)
-          setColdTemp(r.trigger_config?.cold_temp_c || 5)
-          setColdDiscount(r.trigger_config?.cold_discount_percent || 10)
-          setRainEnabled(r.trigger_config?.rain_enabled || false)
-          setRainDiscount(r.trigger_config?.rain_discount_percent || 10)
-          setHotEnabled(r.trigger_config?.hot_enabled || false)
-          setHotTemp(r.trigger_config?.hot_temp_c || 25)
-          setHotDiscount(r.trigger_config?.hot_discount_percent || 10)
-          setOfferDuration(r.offer_duration_minutes || 30)
-          if (r.trigger_config?.cold_product) setColdProducts(r.trigger_config.cold_product.split(', ').filter(p => p))
-          if (r.trigger_config?.rain_product) setRainProducts(r.trigger_config.rain_product.split(', ').filter(p => p))
-          if (r.trigger_config?.hot_product) setHotProducts(r.trigger_config.hot_product.split(', ').filter(p => p))
-        }
-      })
-    }).catch(() => {})
+    getAutoOffers().then(data => setAutoOffers(data?.offers ?? [])).catch(() => {})
     getSpecialOffers().then(data => setSpecialOffers(data?.offers ?? [])).catch(() => {})
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        pos => setUserCoords({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+        () => {}
+      )
+    }
   }, [])
 
   useEffect(() => {
@@ -177,84 +187,82 @@ export default function MerchantView({ onBack }) {
     return () => clearInterval(timer)
   }, [specialCountdown])
 
-  const getRuleByType = useCallback((type) => autoRules?.find(r => r.rule_type === type) || null, [autoRules])
+  const getOffersByType = useCallback((type) => autoOffers.filter(o => o.rule_type === type), [autoOffers])
 
   const toggleRuleExpand = useCallback((ruleType) => {
     setExpandedRules(prev => ({ ...prev, [ruleType]: !prev[ruleType] }))
   }, [])
-
-  const isRuleEnabled = useCallback((ruleType) => {
-    const rule = getRuleByType(ruleType)
-    return rule?.enabled ?? true
-  }, [getRuleByType])
 
   const showConfirmToast = useCallback((message) => {
     setConfirmToast(message)
     setTimeout(() => setConfirmToast(null), 2000)
   }, [])
 
-  const handleToggleRule = useCallback(async (ruleId, currentEnabled) => {
+  const handleCreateAutoOffer = useCallback(async (ruleType, discount, triggerConfig = {}, duration = 30, productName = '') => {
     try {
-      await updateAutoRule(ruleId, { enabled: !currentEnabled })
-      setAutoRules(prev => prev.map(r => r.rule_id === ruleId ? { ...r, enabled: !currentEnabled } : r))
-    } catch {}
-  }, [])
-
-  const saveFirstVisit = useCallback(async () => {
-    const rule = getRuleByType('first_visit')
-    if (!rule) return
-    try {
-      await updateAutoRule(rule.rule_id, { discount_percent: firstVisitDiscount, offer_duration_minutes: offerDuration })
-      setAutoRules(prev => prev.map(r => r.rule_id === rule.rule_id ? { ...r, discount_percent: firstVisitDiscount, offer_duration_minutes: offerDuration } : r))
-      showConfirmToast('First Visit rule saved')
-    } catch {}
-  }, [getRuleByType, firstVisitDiscount, offerDuration, showConfirmToast])
-
-  const saveLoyalty = useCallback(async () => {
-    const rule = getRuleByType('loyalty_reward')
-    if (!rule) return
-    try {
-      await updateAutoRule(rule.rule_id, {
-        discount_percent: loyaltyDiscount,
-        trigger_config: { ...rule.trigger_config, visit_count: loyaltyVisitCount, reward_product: loyaltyProducts.filter(p => p).join(', ') }
+      const res = await createAutoOffer({
+        rule_type: ruleType,
+        discount_percent: discount,
+        trigger_config: triggerConfig,
+        offer_duration_minutes: duration,
+        product_name: productName || null,
       })
-      setAutoRules(prev => prev.map(r => r.rule_id === rule.rule_id ? { ...r, discount_percent: loyaltyDiscount, trigger_config: { ...r.trigger_config, visit_count: loyaltyVisitCount, reward_product: loyaltyProducts.filter(p => p).join(', ') } } : r))
-      showConfirmToast('Loyalty Reward rule saved')
-    } catch {}
-  }, [getRuleByType, loyaltyDiscount, loyaltyVisitCount, loyaltyProducts, showConfirmToast])
+      if (res && res.success) {
+        setAutoOffers(prev => [...prev, res.offer])
+        showConfirmToast('Offer created')
+      } else {
+        console.error('Failed to create auto offer - response:', res)
+        showConfirmToast(res?.error || 'Failed to create offer')
+      }
+    } catch (e) {
+      console.error('Failed to create auto offer - exception:', e)
+      showConfirmToast('Network error - is server running?')
+    }
+  }, [showConfirmToast])
 
-  const saveQuietHour = useCallback(async () => {
-    const rule = getRuleByType('quiet_hour')
-    if (!rule) return
+  const handleDeleteAutoOffer = useCallback(async (offerId) => {
     try {
-      await updateAutoRule(rule.rule_id, { discount_percent: quietDiscount, trigger_config: { density_threshold: quietThreshold } })
-      setAutoRules(prev => prev.map(r => r.rule_id === rule.rule_id ? { ...r, discount_percent: quietDiscount, trigger_config: { density_threshold: quietThreshold } } : r))
-      showConfirmToast('Quiet Hour rule saved')
-    } catch {}
-  }, [getRuleByType, quietDiscount, quietThreshold, showConfirmToast])
+      const res = await deleteAutoOffer(offerId)
+      if (res && res.success) {
+        setAutoOffers(prev => prev.filter(o => o.offer_id !== offerId))
+        showConfirmToast('Offer deleted')
+      } else {
+        console.error('Failed to delete auto offer - response:', res)
+        showConfirmToast(res?.error || 'Failed to delete offer')
+      }
+    } catch (e) {
+      console.error('Failed to delete auto offer - exception:', e)
+      showConfirmToast('Network error')
+    }
+  }, [showConfirmToast])
 
-  const saveWeather = useCallback(async () => {
-    const rule = getRuleByType('weather_match')
-    if (!rule) return
-    try {
-      await updateAutoRule(rule.rule_id, {
-        trigger_config: {
-          cold_enabled: coldEnabled,
-          cold_temp_c: coldTemp,
-          cold_discount_percent: coldDiscount,
-          cold_product: coldProducts.filter(p => p).join(', '),
-          rain_enabled: rainEnabled,
-          rain_discount_percent: rainDiscount,
-          rain_product: rainProducts.filter(p => p).join(', '),
-          hot_enabled: hotEnabled,
-          hot_temp_c: hotTemp,
-          hot_discount_percent: hotDiscount,
-          hot_product: hotProducts.filter(p => p).join(', '),
-        }
-      })
-      showConfirmToast('Weather Match rule saved')
-    } catch {}
-  }, [getRuleByType, coldEnabled, coldTemp, coldDiscount, coldProducts, rainEnabled, rainDiscount, rainProducts, hotEnabled, hotTemp, hotDiscount, hotProducts, showConfirmToast])
+  const saveFirstVisit = useCallback(() => {
+    handleCreateAutoOffer('first_visit', firstVisitDiscount, {}, offerDuration, firstVisitProduct)
+  }, [handleCreateAutoOffer, firstVisitDiscount, offerDuration, firstVisitProduct])
+
+  const saveLoyalty = useCallback(() => {
+    handleCreateAutoOffer('loyalty_reward', loyaltyDiscount, { visit_count: loyaltyVisitCount, reward_product: loyaltyProducts.filter(p => p).join(', ') }, offerDuration, loyaltyProducts.filter(p => p).join(', '))
+  }, [handleCreateAutoOffer, loyaltyDiscount, loyaltyVisitCount, loyaltyProducts, offerDuration])
+
+  const saveQuietHour = useCallback(() => {
+    handleCreateAutoOffer('quiet_hour', quietDiscount, { density_threshold: quietThreshold }, offerDuration, quietProduct)
+  }, [handleCreateAutoOffer, quietDiscount, quietThreshold, offerDuration, quietProduct])
+
+  const saveWeather = useCallback(() => {
+    handleCreateAutoOffer('weather_match', 10, {
+      cold_enabled: coldEnabled,
+      cold_temp_c: coldTemp,
+      cold_discount_percent: coldDiscount,
+      cold_product: coldProducts.filter(p => p).join(', '),
+      rain_enabled: rainEnabled,
+      rain_discount_percent: rainDiscount,
+      rain_product: rainProducts.filter(p => p).join(', '),
+      hot_enabled: hotEnabled,
+      hot_temp_c: hotTemp,
+      hot_discount_percent: hotDiscount,
+      hot_product: hotProducts.filter(p => p).join(', '),
+    }, offerDuration)
+  }, [handleCreateAutoOffer, coldEnabled, coldTemp, coldDiscount, coldProducts, rainEnabled, rainDiscount, rainProducts, hotEnabled, hotTemp, hotDiscount, hotProducts, offerDuration])
 
   const handleCreateSpecialOffer = useCallback(async () => {
     try {
@@ -291,16 +299,24 @@ export default function MerchantView({ onBack }) {
   const updateHotProduct = useCallback((i, v) => setHotProducts(prev => prev.map((p, idx) => idx === i ? v : p)), [])
   const removeHotProduct = useCallback((i) => setHotProducts(prev => prev.filter((_, idx) => idx !== i)), [])
 
-  const firstVisitActive = useCallback(() => `${firstVisitDiscount}% off`, [firstVisitDiscount])
-  const loyaltyActive = useCallback(() => `Every ${loyaltyVisitCount} visits: ${loyaltyDiscount}%`, [loyaltyVisitCount, loyaltyDiscount])
-  const quietActive = useCallback(() => `${quietDiscount}% off (<${quietThreshold}/hr)`, [quietDiscount, quietThreshold])
-  const weatherActive = useCallback(() => {
-    const parts = []
-    if (coldEnabled) parts.push(`Cold`)
-    if (rainEnabled) parts.push(`Rain`)
-    if (hotEnabled) parts.push(`Hot`)
-    return parts.length > 0 ? parts.join(', ') : null
-  }, [coldEnabled, rainEnabled, hotEnabled])
+  const handleSearchMerchants = useCallback(async () => {
+    if (!searchQuery.trim()) return
+    setIsSearching(true)
+    try {
+      const res = await searchMerchants(searchQuery, userCoords.lat, userCoords.lon)
+      setSearchResults(res.places || [])
+    } catch {}
+    setIsSearching(false)
+  }, [searchQuery, userCoords])
+
+  const handleClaimLocation = useCallback(async (place) => {
+    try {
+      await claimMerchantPlace('cafe_mueller', place)
+      setClaimedLocation(place)
+      setShowModal(null)
+      showConfirmToast('Location claimed successfully')
+    } catch {}
+  }, [showConfirmToast])
 
   return (
     <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', position: 'relative', display: 'flex', flexDirection: 'column', background: '#f5f7fb' }}>
@@ -314,14 +330,19 @@ export default function MerchantView({ onBack }) {
           <div style={{ fontSize: 11, fontWeight: 700, color: C.muted, letterSpacing: '0.12em', textTransform: 'uppercase' }}>Merchant dashboard</div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 10 }}>
             <div style={{ width: 48, height: 48, borderRadius: 14, background: C.accentSoft, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800, color: C.accent }}>CM</div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ color: C.text, fontSize: 22, fontWeight: 800, letterSpacing: '-0.4px' }}>Cafe Mueller</div>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ color: C.text, fontSize: 18, fontWeight: 800, letterSpacing: '-0.4px' }}>{claimedLocation?.name || 'Cafe Mueller'}</div>
+              {claimedLocation && <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{claimedLocation.address}</div>}
               <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginTop: 8, background: 'rgba(91,154,245,0.10)', border: '1px solid rgba(91,154,245,0.20)', borderRadius: 999, padding: '5px 12px', fontSize: 12, color: C.accent, fontWeight: 700 }}>
                 <span style={{ width: 6, height: 6, borderRadius: '50%', background: C.success, display: 'inline-block' }} />
                 AI Offer Engine Active
               </div>
             </div>
           </div>
+          <button onClick={() => setShowModal('claim-location')} style={{ marginTop: 14, width: '100%', background: '#f1f5f9', border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 12px', fontSize: 13, fontWeight: 600, color: C.text, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <Search size={16} />
+            {claimedLocation ? 'Change Business Location' : 'Set Your Business Location'}
+          </button>
         </div>
 
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -362,14 +383,17 @@ export default function MerchantView({ onBack }) {
                   description="New customer discount"
                   expanded={expandedRules['first_visit']}
                   onToggleExpand={() => toggleRuleExpand('first_visit')}
-                  enabled={isRuleEnabled('first_visit')}
-                  onToggleEnabled={() => handleToggleRule(getRuleByType('first_visit')?.rule_id, isRuleEnabled('first_visit'))}
-                  activeSummary={firstVisitActive()}
+                  offers={getOffersByType('first_visit')}
+                  onDeleteOffer={handleDeleteAutoOffer}
                 >
                   <div style={{ paddingTop: 12 }}>
                     <SliderField label="Discount" value={firstVisitDiscount} onChange={setFirstVisitDiscount} />
                     <NumberField label="Duration" value={offerDuration} onChange={setOfferDuration} min={5} max={180} unit="min" />
-                    <button onClick={saveFirstVisit} style={{ width: '100%', background: C.accent, color: 'white', border: 'none', borderRadius: 10, padding: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', marginTop: 8 }}>Confirm</button>
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: C.text, marginBottom: 6 }}>Product (optional)</div>
+                      <input type="text" value={firstVisitProduct} onChange={e => setFirstVisitProduct(e.target.value)} placeholder="e.g., any coffee" style={{ width: '100%', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 10px', fontSize: 12 }} />
+                    </div>
+                    <button onClick={saveFirstVisit} style={{ width: '100%', background: C.accent, color: 'white', border: 'none', borderRadius: 10, padding: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', marginTop: 8 }}>Create Offer</button>
                   </div>
                 </RuleCard>
 
@@ -379,15 +403,14 @@ export default function MerchantView({ onBack }) {
                   description="Reward every Nth visit"
                   expanded={expandedRules['loyalty_reward']}
                   onToggleExpand={() => toggleRuleExpand('loyalty_reward')}
-                  enabled={isRuleEnabled('loyalty_reward')}
-                  onToggleEnabled={() => handleToggleRule(getRuleByType('loyalty_reward')?.rule_id, isRuleEnabled('loyalty_reward'))}
-                  activeSummary={loyaltyActive()}
+                  offers={getOffersByType('loyalty_reward')}
+                  onDeleteOffer={handleDeleteAutoOffer}
                 >
                   <div style={{ paddingTop: 12 }}>
                     <NumberField label="Trigger every" value={loyaltyVisitCount} onChange={setLoyaltyVisitCount} min={1} max={20} unit="visits" />
                     <SliderField label="Discount" value={loyaltyDiscount} onChange={setLoyaltyDiscount} />
                     <ProductInput products={loyaltyProducts} onAdd={addLoyaltyProduct} onUpdate={updateLoyaltyProduct} onRemove={removeLoyaltyProduct} label="Products" />
-                    <button onClick={saveLoyalty} style={{ width: '100%', background: C.accent, color: 'white', border: 'none', borderRadius: 10, padding: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', marginTop: 8 }}>Confirm</button>
+                    <button onClick={saveLoyalty} style={{ width: '100%', background: C.accent, color: 'white', border: 'none', borderRadius: 10, padding: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', marginTop: 8 }}>Create Offer</button>
                   </div>
                 </RuleCard>
               </div>
@@ -403,14 +426,17 @@ export default function MerchantView({ onBack }) {
                   description="Low traffic discount"
                   expanded={expandedRules['quiet_hour']}
                   onToggleExpand={() => toggleRuleExpand('quiet_hour')}
-                  enabled={isRuleEnabled('quiet_hour')}
-                  onToggleEnabled={() => handleToggleRule(getRuleByType('quiet_hour')?.rule_id, isRuleEnabled('quiet_hour'))}
-                  activeSummary={quietActive()}
+                  offers={getOffersByType('quiet_hour')}
+                  onDeleteOffer={handleDeleteAutoOffer}
                 >
                   <div style={{ paddingTop: 12 }}>
                     <NumberField label="Threshold" value={quietThreshold} onChange={setQuietThreshold} min={1} max={20} unit="customers/hr" />
                     <SliderField label="Discount" value={quietDiscount} onChange={setQuietDiscount} />
-                    <button onClick={saveQuietHour} style={{ width: '100%', background: C.accent, color: 'white', border: 'none', borderRadius: 10, padding: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', marginTop: 8 }}>Confirm</button>
+                    <div style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, color: C.text, marginBottom: 6 }}>Product (optional)</div>
+                      <input type="text" value={quietProduct} onChange={e => setQuietProduct(e.target.value)} placeholder="e.g., any pastry" style={{ width: '100%', border: `1px solid ${C.border}`, borderRadius: 8, padding: '8px 10px', fontSize: 12 }} />
+                    </div>
+                    <button onClick={saveQuietHour} style={{ width: '100%', background: C.accent, color: 'white', border: 'none', borderRadius: 10, padding: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', marginTop: 8 }}>Create Offer</button>
                   </div>
                 </RuleCard>
 
@@ -420,9 +446,8 @@ export default function MerchantView({ onBack }) {
                   description="Weather-triggered offers"
                   expanded={expandedRules['weather_match']}
                   onToggleExpand={() => toggleRuleExpand('weather_match')}
-                  enabled={isRuleEnabled('weather_match')}
-                  onToggleEnabled={() => handleToggleRule(getRuleByType('weather_match')?.rule_id, isRuleEnabled('weather_match'))}
-                  activeSummary={weatherActive()}
+                  offers={getOffersByType('weather_match')}
+                  onDeleteOffer={handleDeleteAutoOffer}
                 >
                   <div style={{ paddingTop: 12 }}>
                     <div style={{ padding: '10px 0', borderBottom: `1px solid ${C.border}` }}>
@@ -472,7 +497,7 @@ export default function MerchantView({ onBack }) {
                       )}
                     </div>
 
-                    <button onClick={saveWeather} style={{ width: '100%', background: C.accent, color: 'white', border: 'none', borderRadius: 10, padding: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', marginTop: 12 }}>Confirm</button>
+                    <button onClick={saveWeather} style={{ width: '100%', background: C.accent, color: 'white', border: 'none', borderRadius: 10, padding: 10, fontSize: 13, fontWeight: 700, cursor: 'pointer', marginTop: 12 }}>Create Offer</button>
                   </div>
                 </RuleCard>
               </div>
@@ -571,6 +596,52 @@ export default function MerchantView({ onBack }) {
             </div>
 
             <button onClick={handleCreateSpecialOffer} disabled={!newOffer.title} style={{ width: '100%', background: newOffer.title ? C.accent : '#93c5fd', color: 'white', border: 'none', borderRadius: 14, padding: 15, fontSize: 16, fontWeight: 700, cursor: newOffer.title ? 'pointer' : 'not-allowed', marginTop: 4 }}>Create Offer</button>
+          </div>
+        </div>
+      )}
+
+      {showModal === 'claim-location' && (
+        <div onClick={e => e.target === e.currentTarget && setShowModal(null)} style={{ position: 'absolute', inset: 0, background: 'rgba(15,23,42,0.35)', display: 'flex', alignItems: 'flex-end', zIndex: 200 }}>
+          <div style={{ width: '100%', background: C.surface, borderRadius: '24px 24px 0 0', padding: '0 24px 36px', border: `1px solid ${C.border}`, borderBottom: 'none', maxHeight: '80vh', overflowY: 'auto' }}>
+            <div style={{ width: 40, height: 4, background: C.border, borderRadius: 2, margin: '14px auto 20px' }} />
+            <h3 style={{ fontSize: 18, fontWeight: 800, color: C.text, marginBottom: 16 }}>Select Your Business</h3>
+
+            <div style={{ marginBottom: 16, display: 'flex', gap: 8 }}>
+              <input type="text" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder="Search for your business..." style={{ flex: 1, border: `1px solid ${C.border}`, borderRadius: 10, padding: '10px 12px', fontSize: 14, outline: 'none' }} onKeyDown={e => e.key === 'Enter' && handleSearchMerchants()} />
+              <button onClick={handleSearchMerchants} disabled={isSearching} style={{ background: C.accent, color: 'white', border: 'none', borderRadius: 10, padding: '10px 16px', fontSize: 14, fontWeight: 700, cursor: isSearching ? 'not-allowed' : 'pointer' }}>
+                {isSearching ? '...' : <Search size={18} />}
+              </button>
+            </div>
+
+            {claimedLocation && (
+              <div style={{ marginBottom: 12, padding: '12px 14px', background: '#dcfce7', borderRadius: 10, border: '1px solid #86efac' }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#15803d', marginBottom: 4 }}>Currently Claimed</div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: C.text }}>{claimedLocation.name}</div>
+                <div style={{ fontSize: 11, color: '#15803d', marginTop: 2 }}>{claimedLocation.address}</div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {searchResults.length === 0 && searchQuery && !isSearching && (
+                <div style={{ textAlign: 'center', padding: '24px 0', color: C.muted, fontSize: 13 }}>No results found. Try a different search.</div>
+              )}
+              {searchResults.map((place, i) => (
+                <div key={place.place_id || i} style={{ background: C.elevated, borderRadius: 12, border: `1px solid ${C.border}`, padding: '12px 14px', display: 'flex', alignItems: 'center', gap: 12, cursor: 'pointer' }} onClick={() => handleClaimLocation(place)}>
+                  <div style={{ width: 36, height: 36, borderRadius: 10, background: C.accentSoft, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                    <MapPin size={18} style={{ color: C.accent }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: C.text }}>{place.name}</div>
+                    <div style={{ fontSize: 11, color: C.muted, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{place.address}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, color: claimedLocation?.place_id === place.place_id ? C.success : C.accent }}>
+                    {claimedLocation?.place_id === place.place_id ? <Check size={18} /> : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <button onClick={() => setShowModal(null)} style={{ width: '100%', background: '#f1f5f9', color: C.text, border: 'none', borderRadius: 14, padding: 15, fontSize: 16, fontWeight: 700, cursor: 'pointer', marginTop: 20 }}>Close</button>
           </div>
         </div>
       )}

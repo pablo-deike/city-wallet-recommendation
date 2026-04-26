@@ -110,3 +110,34 @@ export function updateSpecialOffer(offerId, updates) {
 export function deleteSpecialOffer(offerId) {
   return del(`/merchant/${MERCHANT_ID}/special-offers/${offerId}`)
 }
+
+export function getAutoOffers() {
+  return get(`/merchant/${MERCHANT_ID}/auto-offers`)
+}
+
+export function createAutoOffer(offer) {
+  return post(`/merchant/${MERCHANT_ID}/auto-offers`, offer)
+}
+
+export function deleteAutoOffer(offerId) {
+  return del(`/merchant/${MERCHANT_ID}/auto-offers/${offerId}`)
+}
+
+export function getNearbyMerchants(lat, lon, radiusKm = 1) {
+  return get(`/api/merchants/nearby?lat=${lat}&lon=${lon}&radius_km=${radiusKm}`)
+}
+
+export function searchMerchants(query, lat, lon, radius = 5000) {
+  return post('/api/merchants/search', { query, lat, lon, radius })
+}
+
+export function claimMerchantPlace(merchantId, place) {
+  return post('/api/merchants/claim', {
+    merchant_id: merchantId,
+    place_id: place.place_id,
+    name: place.name,
+    lat: place.lat,
+    lon: place.lon,
+    address: place.address || '',
+  })
+}

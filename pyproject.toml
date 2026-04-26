@@ -8,6 +8,7 @@ dependencies = [
     "httpx>=0.28.0",
     "polars>=1.0.0",
     "pydantic>=2.10.0",
+    "requests",
     "python-dotenv>=1.0.0",
     "apscheduler>=3.11.0",
 ]

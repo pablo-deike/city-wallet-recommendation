@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
-import { Compass, Clock, Sparkles } from 'lucide-react'
+import { Compass, Clock, MapPin, Sliders, Sparkles } from 'lucide-react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { QRCodeSVG } from 'qrcode.react'
-import { generateOffer, claimOffer, redeemOffer, dismissOffer } from './api'
+import { generateOffer, claimOffer, redeemOffer, dismissOffer, getNearbyMerchants } from './api'
 import { loadGemma4WebHumanizer } from './lib/localPersonalization'
 import { resolveDisplayOffer } from './lib/localPersonalization/resolveDisplayOffer'
 import {
@@ -104,15 +104,16 @@ function getOfferEmojiSet(displayOffer) {
 }
 
 // ── Vanilla Leaflet map ───────────────────────────────────────────────────────
-function LeafletMap({ userLocation, cafeLocation }) {
+function LeafletMap({ userLocation, cafeLocation, merchants, radiusKm, onRadiusChange }) {
   const containerRef = useRef(null)
   const mapRef = useRef(null)
   const userMarker = useRef(null)
   const cafeMarker = useRef(null)
+  const merchantMarkers = useRef([])
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
-    const map = L.map(containerRef.current, { center: [DEFAULT_LOC.lat, DEFAULT_LOC.lon], zoom: 15, zoomControl: false })
+    const map = L.map(containerRef.current, { center: [DEFAULT_LOC.lat, DEFAULT_LOC.lon], zoom: 14, zoomControl: false })
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
     }).addTo(map)
@@ -129,8 +130,8 @@ function LeafletMap({ userLocation, cafeLocation }) {
     })
     if (userMarker.current) userMarker.current.setLatLng([userLocation.lat, userLocation.lon])
     else userMarker.current = L.marker([userLocation.lat, userLocation.lon], { icon }).addTo(map)
-    if (!cafeLocation) map.flyTo([userLocation.lat, userLocation.lon], 15, { animate: true, duration: 1.2 })
-  }, [userLocation, cafeLocation])
+    map.flyTo([userLocation.lat, userLocation.lon], 14, { animate: true, duration: 0.8 })
+  }, [userLocation])
 
   useEffect(() => {
     const map = mapRef.current
@@ -145,7 +146,36 @@ function LeafletMap({ userLocation, cafeLocation }) {
     }
   }, [cafeLocation, userLocation])
 
-  return <div ref={containerRef} style={{ position: 'absolute', inset: 0, height: '100%', width: '100%' }} />
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map) return
+    merchantMarkers.current.forEach(m => m.remove())
+    merchantMarkers.current = []
+    if (!merchants || merchants.length === 0) return
+    merchants.forEach(m => {
+      if (!m.lat || !m.lon) return
+      const icon = L.divIcon({
+        html: '<div style="width:28px;height:28px;border-radius:50%;background:#ffffff;border:2px solid #3b82f6;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 8px rgba(0,0,0,0.15)"><svg style="width:16px;height:16px;color:#3b82f6" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/></svg></div>',
+        className: '', iconSize: [28, 28], iconAnchor: [14, 28],
+      })
+      const marker = L.marker([m.lat, m.lon], { icon }).addTo(map)
+      marker.bindPopup(`<div style="font-size:13px;font-weight:600">${m.name || 'Unknown'}</div><div style="font-size:11px;color:#6b7280">${m.distance_km?.toFixed(1) || '?'} km</div>`)
+      merchantMarkers.current.push(marker)
+    })
+  }, [merchants])
+
+  return (
+    <div style={{ position: 'relative', width: '100%', height: '100%' }}>
+      <div ref={containerRef} style={{ position: 'absolute', inset: 0, height: '100%', width: '100%' }} />
+      <div style={{ position: 'absolute', top: 12, right: 12, zIndex: 1000, background: 'rgba(255,255,255,0.95)', backdropFilter: 'blur(12px)', borderRadius: 12, padding: '10px 14px', boxShadow: '0 4px 16px rgba(0,0,0,0.1)', border: '1px solid #dbe3ef' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+          <Sliders size={14} style={{ color: '#6b7280' }} />
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#374151' }}>Range: {radiusKm} km</span>
+        </div>
+        <input type="range" min="1" max="10" step="0.5" value={radiusKm} onChange={e => onRadiusChange?.(Number(e.target.value))} style={{ width: 100 }} />
+      </div>
+    </div>
+  )
 }
 
 // ── Role selection screen ─────────────────────────────────────────────────────
@@ -191,6 +221,8 @@ export default function App() {
   const [preferenceHistory, setPreferenceHistory] = useState(() => loadPreferenceHistory())
   const [preferenceSheetMode, setPreferenceSheetMode] = useState('closed')
   const [onboardingShown, setOnboardingShown] = useState(false)
+  const [radiusKm, setRadiusKm] = useState(1)
+  const [merchants, setMerchants] = useState([])
 
   const preferenceIntent = useMemo(() => mergePreferenceIntent(preferenceHistory), [preferenceHistory])
   const cafeLocation = offer?.merchant_lat && offer?.merchant_lon ? { lat: offer.merchant_lat, lon: offer.merchant_lon } : null
@@ -202,7 +234,6 @@ export default function App() {
   const offerEmojiSet = getOfferEmojiSet(offer)
   const supportNote = getSupportNote(offer)
 
-  // Parse discount % from strings like "15% off any hot drink"
   const discountPct = offer ? (parseInt(offer.discount) || 0) : 0
   const savings = parseFloat((BASE_PRICE * discountPct / 100).toFixed(2))
   const youPay = parseFloat((BASE_PRICE - savings).toFixed(2))
@@ -243,24 +274,30 @@ export default function App() {
     if (preferenceSheetMode === 'onboarding') return
     if (userLocation) return
 
+    const fetchInitialData = (lat, lon) => {
+      fetchOfferForLocation(lat, lon)
+      getNearbyMerchants(lat, lon, radiusKm).then(res => setMerchants(res.merchants || [])).catch(() => setMerchants([]))
+    }
+
     if (!navigator.geolocation) {
       setUserLocation(DEFAULT_LOC)
-      fetchOfferForLocation(DEFAULT_LOC.lat, DEFAULT_LOC.lon)
+      fetchInitialData(DEFAULT_LOC.lat, DEFAULT_LOC.lon)
       return
     }
+
     navigator.geolocation.getCurrentPosition(
       pos => {
         const loc = { lat: pos.coords.latitude, lon: pos.coords.longitude }
         setUserLocation(loc)
-        fetchOfferForLocation(loc.lat, loc.lon)
+        fetchInitialData(loc.lat, loc.lon)
       },
       () => {
         setUserLocation(DEFAULT_LOC)
-        fetchOfferForLocation(DEFAULT_LOC.lat, DEFAULT_LOC.lon)
+        fetchInitialData(DEFAULT_LOC.lat, DEFAULT_LOC.lon)
       },
       { timeout: 8000, maximumAge: 60000 }
     )
-  }, [view, preferenceSheetMode, userLocation, fetchOfferForLocation])
+  }, [view, preferenceSheetMode, userLocation, fetchOfferForLocation, radiusKm])
 
   useEffect(() => {
     if (view !== 'user') return
@@ -318,6 +355,11 @@ export default function App() {
       cancelled = true
     }
   }, [rawOffer, localContext, localRuntime, localRuntimeReady])
+
+  useEffect(() => {
+    if (!userLocation) return
+    getNearbyMerchants(userLocation.lat, userLocation.lon, radiusKm).then(res => setMerchants(res.merchants || [])).catch(() => setMerchants([]))
+  }, [radiusKm, userLocation])
 
   useEffect(() => {
     if (screen !== 'dismissed') return
@@ -411,7 +453,7 @@ export default function App() {
 
         {subTab === 'explore' && (
           <>
-            <LeafletMap userLocation={userLocation} cafeLocation={cafeLocation} />
+            <LeafletMap userLocation={userLocation} cafeLocation={cafeLocation} merchants={merchants} radiusKm={radiusKm} onRadiusChange={setRadiusKm} />
 
             {/* Floating preference button */}
             {(screen === 'offer' || screen === 'dismissed') && (

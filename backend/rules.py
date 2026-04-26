@@ -97,6 +97,26 @@ class SpecialOfferUpdate(BaseModel):
     active: Optional[bool] = None
 
 
+class AutoOfferInstance(BaseModel):
+    offer_id: str
+    merchant_id: str
+    rule_type: AutoRuleType
+    discount_percent: int
+    trigger_config: dict
+    offer_duration_minutes: int = 30
+    product_name: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AutoOfferCreate(BaseModel):
+    rule_type: AutoRuleType
+    discount_percent: int
+    trigger_config: dict
+    offer_duration_minutes: Optional[int] = None
+    product_name: Optional[str] = None
+
+
 AUTO_RULE_DEFAULTS = {
     AutoRuleType.FIRST_VISIT: {
         "trigger_config": {},
@@ -166,6 +186,7 @@ AUTO_RULE_METADATA = {
 
 auto_rules_db: dict[str, AutoRule] = {}
 special_offers_db: dict[str, SpecialOffer] = {}
+auto_offers_db: dict[str, AutoOfferInstance] = {}
 user_transaction_history: dict[str, dict[str, int]] = {}
 
 
@@ -175,6 +196,14 @@ def get_merchant_auto_rules(merchant_id: str) -> list[AutoRule]:
 
 def get_merchant_special_offers(merchant_id: str) -> list[SpecialOffer]:
     return [o for o in special_offers_db.values() if o.merchant_id == merchant_id]
+
+
+def get_merchant_auto_offers(merchant_id: str) -> list[AutoOfferInstance]:
+    return [o for o in auto_offers_db.values() if o.merchant_id == merchant_id]
+
+
+def get_merchant_auto_offers_by_type(merchant_id: str, rule_type: AutoRuleType) -> list[AutoOfferInstance]:
+    return [o for o in auto_offers_db.values() if o.merchant_id == merchant_id and o.rule_type == rule_type]
 
 
 def create_default_auto_rules(merchant_id: str) -> list[AutoRule]:
