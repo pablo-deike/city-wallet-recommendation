@@ -5,6 +5,7 @@ import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { generateOffer, claimOffer, redeemOffer, dismissOffer } from './api'
 import MerchantView from './MerchantView'
+import vicoLogo from './images/vico-logo.svg'
 
 const MERCHANT_COORDS = {
   cafe_mueller: { lat: 52.5200, lon: 13.4050 },
@@ -82,8 +83,7 @@ function RoleSelect({ onSelect }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#f5f7fb', justifyContent: 'center', alignItems: 'center', padding: '0 28px' }}>
       <div style={{ marginBottom: 48, textAlign: 'center' }}>
-        <div style={{ fontSize: 48, marginBottom: 16 }}>💳</div>
-        <h1 style={{ fontSize: 28, fontWeight: 800, color: '#111827', letterSpacing: '-0.5px', marginBottom: 8 }}>Vico</h1>
+        <img src={vicoLogo} alt="Vico" style={{ width: 180, marginBottom: 24, display: 'block', margin: '0 auto 24px' }} />
         <p style={{ fontSize: 15, color: '#6b7280', lineHeight: 1.5 }}>Who are you today?</p>
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%' }}>
@@ -182,7 +182,7 @@ export default function App() {
 
       {/* Header */}
       <header style={{ position: 'sticky', top: 0, zIndex: 2000, display: 'flex', alignItems: 'center', padding: '12px 20px', background: 'rgba(255,255,255,0.92)', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)', borderBottom: '1px solid #dbe3ef' }}>
-        <span style={{ fontSize: 20, fontWeight: 700, letterSpacing: '-0.4px', color: '#111827' }}>💳 Vico</span>
+        <img src={vicoLogo} alt="Vico" style={{ height: 36 }} />
       </header>
 
       {/* Main */}
