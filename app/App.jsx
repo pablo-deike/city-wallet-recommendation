@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'motion/react'
 import { Compass, Clock } from 'lucide-react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
+import { QRCodeSVG } from 'qrcode.react'
 import { generateOffer, claimOffer, redeemOffer, dismissOffer } from './api'
 import MerchantView from './MerchantView'
 import vicoLogo from './images/vico-logo.svg'
@@ -14,24 +15,16 @@ const MERCHANT_COORDS = {
 const DEFAULT_LOC = { lat: 52.5185, lon: 13.4010 }
 const BASE_PRICE  = 4.90
 
-// ── QR grid (static fake QR) ──────────────────────────────────────────────────
-const QR_GRID = (() => {
-  const SIZE = 25
-  let seed = 0xabcd1234
-  const rand = () => { seed = ((seed * 1664525) + 1013904223) >>> 0; return ((seed >>> 16) & 1) === 1 }
-  const grid = Array.from({ length: SIZE }, () => Array.from({ length: SIZE }, () => rand()))
-  const finder = (ro, co) => {
-    for (let r = 0; r < 7; r++) for (let c = 0; c < 7; c++)
-      grid[ro+r][co+c] = r===0||r===6||c===0||c===6 || (r>=2&&r<=4&&c>=2&&c<=4)
-    for (let i = 0; i < 8; i++) {
-      if (ro+7 < SIZE && co+i < SIZE) grid[ro+7][co+i] = false
-      if (ro+i < SIZE && co+7 < SIZE) grid[ro+i][co+7] = false
-    }
-  }
-  finder(0, 0); finder(0, SIZE-7); finder(SIZE-7, 0)
-  for (let i = 8; i < SIZE-8; i++) { grid[6][i] = i%2===0; grid[i][6] = i%2===0 }
-  return grid
-})()
+
+// ── Small tappable map thumbnail ─────────────────────────────────────────────
+function MapThumb({ mapsUrl, mapsImageUrl, size = 56, radius = 10 }) {
+  return (
+    <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
+       style={{ display: 'block', width: size, height: size, borderRadius: radius, overflow: 'hidden', flexShrink: 0, border: '1px solid #dbe3ef' }}>
+      <img src={mapsImageUrl} alt="map" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+    </a>
+  )
+}
 
 // ── Vanilla Leaflet map ───────────────────────────────────────────────────────
 function LeafletMap({ userLocation, cafeLocation }) {
@@ -66,7 +59,7 @@ function LeafletMap({ userLocation, cafeLocation }) {
     const map = mapRef.current
     if (!map) return
     if (cafeLocation) {
-      const icon = L.divIcon({ html: '<div class="cafe-marker">☕</div>', className: '', iconSize: [40,40], iconAnchor: [20,20] })
+      const icon = L.divIcon({ html: '<div class="cafe-marker"></div>', className: '', iconSize: [40,40], iconAnchor: [20,20] })
       if (cafeMarker.current) cafeMarker.current.setLatLng([cafeLocation.lat, cafeLocation.lon])
       else cafeMarker.current = L.marker([cafeLocation.lat, cafeLocation.lon], { icon }).addTo(map)
       if (userLocation) map.fitBounds([[userLocation.lat, userLocation.lon],[cafeLocation.lat, cafeLocation.lon]], { padding: [80,80], animate: true })
@@ -88,14 +81,12 @@ function RoleSelect({ onSelect }) {
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14, width: '100%' }}>
         <button onClick={() => onSelect('user')} style={{ width: '100%', background: '#3b82f6', color: 'white', border: 'none', borderRadius: 18, padding: '22px 24px', fontSize: 16, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14, boxShadow: '0 8px 24px rgba(59,130,246,0.2)' }}>
-          <span style={{ fontSize: 28 }}>🧑‍💼</span>
           <div style={{ textAlign: 'left' }}>
             <div>I'm a Customer</div>
             <div style={{ fontSize: 12, fontWeight: 500, opacity: 0.7, marginTop: 2 }}>Find offers near you</div>
           </div>
         </button>
         <button onClick={() => onSelect('merchant')} style={{ width: '100%', background: '#ffffff', color: '#111827', border: '1.5px solid #dbe3ef', borderRadius: 18, padding: '22px 24px', fontSize: 16, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 14, boxShadow: '0 4px 16px rgba(15,23,42,0.08)' }}>
-          <span style={{ fontSize: 28 }}>☕</span>
           <div style={{ textAlign: 'left' }}>
             <div>I'm a Merchant</div>
             <div style={{ fontSize: 12, fontWeight: 500, color: '#6b7280', marginTop: 2 }}>Manage your offers & stats</div>
@@ -162,7 +153,8 @@ export default function App() {
         id: offer.offer_id,
         merchant: offer.merchant,
         discount: offer.discount,
-        emoji: offer.emoji ?? '☕',
+        mapsUrl: offer.maps_url,
+        mapsImageUrl: offer.maps_image_url,
         youPay,
         date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         qrToken: qrData?.qr_token,
@@ -206,7 +198,7 @@ export default function App() {
                     </div>
                     <div style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                        <div style={{ fontSize: 38, lineHeight: 1, flexShrink: 0 }}>{offer.emoji ?? '☕'}</div>
+                        <MapThumb mapsUrl={offer.maps_url} mapsImageUrl={offer.maps_image_url} size={56} />
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
                             <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b7280', margin: 0 }}>{offer.merchant}</p>
@@ -259,7 +251,7 @@ export default function App() {
 
                     {/* Offer summary */}
                     <div style={{ background: '#ffffff', border: '1px solid #dbe3ef', borderRadius: 16, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
-                      <div style={{ fontSize: 32, lineHeight: 1 }}>{offer?.emoji ?? '☕'}</div>
+                      <MapThumb mapsUrl={offer?.maps_url} mapsImageUrl={offer?.maps_image_url} size={52} />
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>{offer?.merchant}</div>
                         <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{offer?.discount}</div>
@@ -287,7 +279,6 @@ export default function App() {
                       <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b7280', marginBottom: 10 }}>Payment method</p>
                       <div style={{ background: '#ffffff', border: '2px solid #5b9af5', borderRadius: 16, padding: '14px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                          <span style={{ fontSize: 24 }}>💳</span>
                           <div>
                             <div style={{ fontSize: 14, fontWeight: 700, color: '#111827' }}>Vico</div>
                             <div style={{ fontSize: 12, color: '#6b7280', marginTop: 1 }}>Default payment method</div>
@@ -333,11 +324,7 @@ export default function App() {
                     {/* QR code */}
                     <div style={{ display: 'flex', justifyContent: 'center' }}>
                       <div style={{ display: 'inline-block', padding: 16, background: 'white', borderRadius: 16, boxShadow: '0 4px 24px rgba(0,0,0,0.4)', lineHeight: 0 }}>
-                        {QR_GRID.map((row, r) => (
-                          <div key={r} style={{ display: 'flex' }}>
-                            {row.map((dark, c) => <div key={c} style={{ width: 9, height: 9, background: dark ? '#111113' : 'white', flexShrink: 0 }} />)}
-                          </div>
-                        ))}
+                        <QRCodeSVG value={qrData?.qr_token ?? `QR-FALLBACK-${offer?.offer_id}`} size={225} />
                       </div>
                     </div>
 
@@ -354,14 +341,13 @@ export default function App() {
             <h2 style={{ fontSize: 24, fontWeight: 700, color: '#111827', letterSpacing: '-0.4px', margin: 0 }}>My Offers</h2>
             {history.length === 0 ? (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 60, color: '#9ca3af' }}>
-                <span style={{ fontSize: 40 }}>🎫</span>
                 <span style={{ fontSize: 15, fontWeight: 600 }}>No accepted offers yet</span>
               </div>
             ) : (
               history.map(item => (
                 <div key={item.id} style={{ background: '#ffffff', border: '1px solid #dbe3ef', borderRadius: 16, overflow: 'hidden' }}>
                   <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <div style={{ fontSize: 30, lineHeight: 1, flexShrink: 0 }}>{item.emoji}</div>
+                    <MapThumb mapsUrl={item.mapsUrl} mapsImageUrl={item.mapsImageUrl} size={48} radius={8} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>{item.merchant}</div>
                       <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{item.discount}</div>
@@ -382,11 +368,7 @@ export default function App() {
                   {expandedQr === item.id && (
                     <div style={{ borderTop: '1px solid #f3f4f6', padding: '16px', display: 'flex', justifyContent: 'center', background: '#f8fafc' }}>
                       <div style={{ display: 'inline-block', padding: 12, background: 'white', borderRadius: 12, boxShadow: '0 2px 12px rgba(0,0,0,0.15)', lineHeight: 0 }}>
-                        {QR_GRID.map((row, r) => (
-                          <div key={r} style={{ display: 'flex' }}>
-                            {row.map((dark, c) => <div key={c} style={{ width: 7, height: 7, background: dark ? '#111113' : 'white', flexShrink: 0 }} />)}
-                          </div>
-                        ))}
+                        <QRCodeSVG value={item.qrToken ?? `QR-FALLBACK-${item.id}`} size={175} />
                       </div>
                     </div>
                   )}
