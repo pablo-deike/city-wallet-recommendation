@@ -4,7 +4,7 @@ from pydantic import BaseModel
 import math
 from datetime import datetime
 
-app = FastAPI(title="City Wallet API")
+app = FastAPI(title="City Wallet API (Refactored)")
 
 app.add_middleware(
     CORSMiddleware,
@@ -13,8 +13,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
-# ── Request bodies ────────────────────────────────────────────────────────────
+# ── Request bodies ─────────────────────────────────────────
 
 class ContextPayload(BaseModel):
     user_id: str
@@ -23,13 +22,13 @@ class ContextPayload(BaseModel):
     weather: str
     temperature: int
 
-class ClaimPayload(BaseModel):
+class AcceptPayload(BaseModel):
     user_id: str
 
-class RedeemPayload(BaseModel):
+class CheckoutPayload(BaseModel):
     user_id: str
-    qr_token: str
-    purchase_amount: float = 10.0  # Default purchase amount
+    code: str
+    purchase_amount: float = 10.0
 
 class DismissPayload(BaseModel):
     user_id: str
@@ -40,10 +39,6 @@ class UpdateRulesPayload(BaseModel):
     quiet_threshold: int
     offer_duration: int
 
-
-# ── Data stores ──────────────────────────────────────────────────────────────
-
-# Merchant database with locations and rules
 merchants_db = {
     "cafe_mueller": {
         "name": "Café Müller",
@@ -55,220 +50,157 @@ merchants_db = {
         ],
         "max_discount": 20,
         "quiet_threshold": 5,
-        "offer_duration": 18,
-    },
-    "pizza_place": {
-        "name": "Pizzeria Napoli",
-        "lat": 52.5210,
-        "lon": 13.4060,
-        "offers": [
-            {"type": "quiet_hours", "discount": "10% off lunch special", "emoji": "🍕"},
-        ],
-        "max_discount": 15,
-        "quiet_threshold": 8,
-        "offer_duration": 20,
-    },
+        "offer_duration": 15,
+    }
 }
 
-# Store active offers to retrieve correct merchant/discount on claim
 offers_store = {}
-
-# Track merchant statistics and rules
 merchant_stats = {}
 merchant_rules = {}
-
-# Track user wallets
 user_wallets = {}
 
-
-# ── Offer endpoints ───────────────────────────────────────────────────────────
+# ── OFFER GENERATION ───────────────────────────────────────
 
 @app.post("/offers/generate")
 def generate_offer(ctx: ContextPayload):
-    
-    print(f"\n[OFFERS] generate_offer called")
-    print(f"  user_id     : {ctx.user_id}")
-    print(f"  location    : ({ctx.lat}, {ctx.lon})")
-    print(f"  weather     : {ctx.weather}, {ctx.temperature}°C")
-    print(f"  → running AI offer engine...")
-    
-    # Find nearest merchant based on user location
     nearest_merchant = None
-    min_distance = float('inf')
-    
+    min_distance = float("inf")
+
     for merchant_id, merchant in merchants_db.items():
-        # Calculate distance using Haversine formula (simplified)
-        distance = math.sqrt((merchant["lat"] - ctx.lat)**2 + (merchant["lon"] - ctx.lon)**2) * 111  # km to meters
+        distance = math.sqrt((merchant["lat"] - ctx.lat)**2 + (merchant["lon"] - ctx.lon)**2) * 111000
         if distance < min_distance:
             min_distance = distance
             nearest_merchant = (merchant_id, merchant, distance)
-    
+
     if not nearest_merchant:
-        return {"error": "No merchants available"}
-    
+        return {"error": "No merchants found"}
+
     merchant_id, merchant, distance_m = nearest_merchant
-    print(f"  → nearest merchant: {merchant['name']} ({distance_m:.0f}m)")
-    
-    # Select offer based on context (weather, time, etc.)
-    offer_config = None
-    trigger_reason = ""
-    
-    if ctx.temperature < 5 and ctx.weather in ["cloudy", "rainy", "snowy"]:
-        offer_config = merchant["offers"][0]  # Cold weather offer
-        trigger_reason = "cold weather match"
+
+    # Simple context logic
+    if ctx.temperature < 5:
+        offer_config = merchant["offers"][0]
     else:
-        offer_config = merchant["offers"][0]  # Default to first offer
-        trigger_reason = "personalized recommendation"
-    
-    print(f"  → trigger: {trigger_reason}")
-    print(f"  → generated: {offer_config['discount']}, valid {merchant['offer_duration']} min")
-    
-    # Generate unique offer ID
-    offer_id = f"offer_{datetime.now().timestamp()}_{ctx.user_id[:4]}"
-    
-    # Create offer data
-    offer_data = {
+        offer_config = merchant["offers"][1]
+
+    offer_id = f"offer_{int(datetime.now().timestamp())}"
+
+    offer = {
         "offer_id": offer_id,
         "merchant_id": merchant_id,
         "merchant": merchant["name"],
-        "distance_m": int(distance_m),
-        "headline": f"{offer_config['emoji']} {merchant['name']} is offering...",
         "discount": offer_config["discount"],
-        "reason": f"Quiet right now — offer valid for {merchant['offer_duration']} minutes",
-        "valid_minutes": merchant['offer_duration'],
         "emoji": offer_config["emoji"],
+        "distance_m": int(distance_m),
+        "headline": f"{offer_config['emoji']} Warm up nearby",
         "created_at": datetime.now().isoformat(),
-    }
-    
-    # Store the offer so claim can retrieve it
-    offers_store[offer_id] = offer_data
-    
-    return offer_data
-
-
-@app.post("/offers/{offer_id}/claim")
-def claim_offer(offer_id: str, body: ClaimPayload):
-    print(f"\n[OFFERS] claim_offer called")
-    print(f"  offer_id : {offer_id}")
-    print(f"  user_id  : {body.user_id}")
-    
-    # Look up the stored offer to get correct merchant and discount
-    offer = offers_store.get(offer_id)
-    if not offer:
-        return {"error": "Offer not found or expired"}
-    
-    print(f"  → generating QR token...")
-    print(f"  → QR token: QR-{offer_id.upper()}-{body.user_id.upper()[:6]}")
-    print(f"  → offer locked to user, countdown started (2:00)")
-    return {
-        "qr_token": f"QR-{offer_id.upper()}-{body.user_id.upper()[:6]}",
-        "expires_in_seconds": 120,
-        "merchant": offer["merchant"], 
-        "discount": offer["discount"],  
+        "status": "generated"
     }
 
+    offers_store[offer_id] = offer
 
-@app.post("/offers/{offer_id}/redeem")
-def redeem_offer(offer_id: str, body: RedeemPayload):
-    print(f"\n[OFFERS] redeem_offer called")
-    print(f"  offer_id  : {offer_id}")
-    print(f"  user_id   : {body.user_id}")
-    print(f"  qr_token  : {body.qr_token}")
-    print(f"  purchase_amount: €{body.purchase_amount:.2f}")
-    
-    # Validate QR token format
-    if not body.qr_token.startswith("QR-"):
-        return {"error": "Invalid QR token format"}
-    
-    # Look up the offer
-    offer = offers_store.get(offer_id)
-    if not offer:
-        return {"error": "Offer not found or expired"}
-    
-    print(f"  → validating QR token... ✓")
-    print(f"  → marking offer as redeemed")
-    
-    # Extract discount percentage from discount string (e.g., "15% off any hot drink" → 15)
-    discount_str = offer.get("discount", "0% off")
-    try:
-        discount_percent = int(discount_str.split("%")[0])
-    except (ValueError, IndexError):
-        discount_percent = 0
-    
-    # Calculate cashback
-    cashback_earned = (body.purchase_amount * discount_percent) / 100
-    
-    print(f"  → calculating cashback: {discount_percent}% of €{body.purchase_amount:.2f} = €{cashback_earned:.2f}")
-    
-    # Get or initialize user wallet
-    if body.user_id not in user_wallets:
-        user_wallets[body.user_id] = 0.0
-    
-    old_balance = user_wallets[body.user_id]
-    new_balance = old_balance + cashback_earned
-    user_wallets[body.user_id] = new_balance
-    
-    print(f"  → crediting €{cashback_earned:.2f} to wallet of {body.user_id}")
-    print(f"  → old balance: €{old_balance:.2f} → new balance: €{new_balance:.2f}")
-    
-    # Update merchant stats
-    merchant_id = offer.get("merchant_id")
+    # Track stats
     if merchant_id not in merchant_stats:
         merchant_stats[merchant_id] = {
             "offers_sent": 0,
             "offers_accepted": 0,
             "cashback_issued": 0.0,
         }
-    
+
+    merchant_stats[merchant_id]["offers_sent"] += 1
+
+    return {
+        **offer,
+        "expires_in_seconds": 120,
+        "message": "Offer valid for 2 minutes"
+    }
+
+# ── ACCEPT OFFER (replaces claim) ──────────────────────────
+
+@app.post("/offers/{offer_id}/accept")
+def accept_offer(offer_id: str, body: AcceptPayload):
+    offer = offers_store.get(offer_id)
+    if not offer:
+        return {"error": "Offer not found"}
+
+    created_time = datetime.fromisoformat(offer["created_at"])
+    if (datetime.now() - created_time).total_seconds() > 120:
+        return {"error": "Offer expired"}
+
+    # Generate discount code
+    code = f"{offer['merchant_id'][:4].upper()}{int(datetime.now().timestamp()) % 1000}"
+
+    offer["status"] = "accepted"
+    offer["accepted_at"] = datetime.now().isoformat()
+    offer["accepted_by"] = body.user_id
+    offer["code"] = code
+
+    return {
+        "code": code,
+        "merchant": offer["merchant"],
+        "discount": offer["discount"],
+        "checkout_expires_in": 600,
+        "message": "Show this code at checkout (valid 10 min)"
+    }
+
+# ── CHECKOUT (replaces redeem) ─────────────────────────────
+
+@app.post("/offers/{offer_id}/checkout")
+def checkout_offer(offer_id: str, body: CheckoutPayload):
+    offer = offers_store.get(offer_id)
+    if not offer:
+        return {"error": "Offer not found"}
+
+    if offer.get("status") != "accepted":
+        return {"error": "Offer must be accepted first"}
+
+    if offer.get("code") != body.code:
+        return {"error": "Invalid code"}
+
+    accepted_time = datetime.fromisoformat(offer["accepted_at"])
+    if (datetime.now() - accepted_time).total_seconds() > 600:
+        return {"error": "Code expired"}
+
+    # Extract discount %
+    try:
+        discount_percent = int(offer["discount"].split("%")[0])
+    except:
+        discount_percent = 0
+
+    cashback = (body.purchase_amount * discount_percent) / 100
+
+    # Wallet
+    if body.user_id not in user_wallets:
+        user_wallets[body.user_id] = 0.0
+
+    user_wallets[body.user_id] += cashback
+
+    # Stats
+    merchant_id = offer["merchant_id"]
     merchant_stats[merchant_id]["offers_accepted"] += 1
-    merchant_stats[merchant_id]["cashback_issued"] += cashback_earned
-    
+    merchant_stats[merchant_id]["cashback_issued"] += cashback
+
+    offer["status"] = "redeemed"
+
     return {
         "success": True,
-        "offer_id": offer_id,
-        "merchant": offer.get("merchant"),
-        "discount": offer.get("discount"),
-        "purchase_amount": body.purchase_amount,
-        "cashback_earned": round(cashback_earned, 2),
-        "old_balance": round(old_balance, 2),
-        "new_balance": round(new_balance, 2),
-        "message": f"Cashback of €{cashback_earned:.2f} added to your wallet",
+        "cashback_earned": round(cashback, 2),
+        "new_balance": round(user_wallets[body.user_id], 2),
+        "message": f"€{cashback:.2f} cashback applied"
     }
 
 
 @app.post("/offers/{offer_id}/dismiss")
 def dismiss_offer(offer_id: str, body: DismissPayload):
-    print(f"\n[OFFERS] dismiss_offer called")
-    print(f"  offer_id : {offer_id}")
-    print(f"  user_id  : {body.user_id}")
-    print(f"  reason   : {body.reason or 'not specified'}")
-    print(f"  → logging dismissal signal for ML training")
-    print(f"  → scheduling retry with different offer in ~15 min")
-    return {"message": "Got it — we'll find a better moment"}
+    return {"message": "Offer dismissed"}
 
-
-# ── User endpoints ────────────────────────────────────────────────────────────
 
 @app.get("/user/{user_id}/wallet")
-def get_user_wallet(user_id: str):
-    print(f"\n[USER] get_wallet called")
-    print(f"  user_id : {user_id}")
-    
-    # Get or initialize wallet
+def get_wallet(user_id: str):
     if user_id not in user_wallets:
         user_wallets[user_id] = 0.0
-    
-    balance = user_wallets[user_id]
-    print(f"  → wallet balance: €{balance:.2f}")
-    
-    return {
-        "user_id": user_id,
-        "balance": round(balance, 2),
-        "currency": "EUR",
-    }
+    return {"balance": round(user_wallets[user_id], 2)}
 
-
-# ── Merchant endpoints ────────────────────────────────────────────────────────
 
 @app.get("/merchant/{merchant_id}/stats")
 def get_merchant_stats(merchant_id: str):
@@ -305,7 +237,6 @@ def get_merchant_stats(merchant_id: str):
         "cashback_issued": stats["cashback_issued"],
     }
 
-
 @app.get("/merchant/{merchant_id}/offers")
 def get_offer_feed(merchant_id: str):
     print(f"\n[MERCHANT] get_offer_feed called")
@@ -336,38 +267,6 @@ def get_offer_feed(merchant_id: str):
         "merchant_id": merchant_id,
         "total_offers": len(merchant_offers),
         "offers": merchant_offers[-5:] if merchant_offers else [],  # Last 5
-    }
-
-
-@app.get("/merchant/{merchant_id}/rules")
-def get_merchant_rules(merchant_id: str):
-    print(f"\n[MERCHANT] get_rules called")
-    print(f"  merchant_id : {merchant_id}")
-    
-    # Verify merchant exists
-    if merchant_id not in merchants_db:
-        return {"error": f"Merchant {merchant_id} not found"}
-    
-    merchant = merchants_db[merchant_id]
-    
-    # Get current rules (or use defaults from merchants_db)
-    if merchant_id not in merchant_rules:
-        merchant_rules[merchant_id] = {
-            "max_discount": merchant["max_discount"],
-            "quiet_threshold": merchant["quiet_threshold"],
-            "offer_duration": merchant["offer_duration"],
-        }
-    
-    rules = merchant_rules[merchant_id]
-    print(f"  → loading active rule config for {merchant['name']}")
-    
-    return {
-        "merchant_id": merchant_id,
-        "merchant_name": merchant["name"],
-        "max_discount": rules["max_discount"],
-        "quiet_threshold": rules["quiet_threshold"],
-        "offer_duration": rules["offer_duration"],
-        "goal": "fill seats during quiet periods",
     }
 
 
