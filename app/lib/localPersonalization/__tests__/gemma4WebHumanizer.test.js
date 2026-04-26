@@ -26,6 +26,8 @@ const rawOffer = Object.freeze({
   distance_m: 80,
   discount: '15% off any hot drink',
   valid_minutes: 18,
+  maps_url: 'https://maps.example.test/cafe',
+  maps_image_url: 'https://maps.example.test/cafe.png',
   headline: 'Cold outside? Your cappuccino is waiting.',
   reason: 'Quiet right now — offer valid for 18 minutes',
   emoji: '☕',
@@ -66,9 +68,10 @@ describe('gemma4WebHumanizer', () => {
     const setOptions = vi.fn(async () => {})
     const generateResponse = vi.fn(async () =>
       JSON.stringify({
-        headline: 'Fresh break nearby',
+        headline: 'Fresh break nearby ✨',
         reason: 'Your calm coffee reset is around the corner',
         emoji: '☕',
+        support_note: 'Nice pick - this feels like a smart little reset.',
       }),
     )
 
@@ -105,8 +108,9 @@ describe('gemma4WebHumanizer', () => {
 
     expect(generateResponse).toHaveBeenCalledTimes(1)
     expect(generateResponse.mock.calls[0][0]).toContain('Quiet patio coffee')
+    expect(generateResponse.mock.calls[0][0]).toContain('support_note')
     expect(result).toEqual({
-      headline: 'Fresh break nearby',
+      headline: 'Fresh break nearby ✨',
       reason: 'Your calm coffee reset is around the corner',
       emoji: '☕',
       merchant: rawOffer.merchant,
@@ -114,12 +118,15 @@ describe('gemma4WebHumanizer', () => {
       discount: rawOffer.discount,
       valid_minutes: rawOffer.valid_minutes,
       offer_id: rawOffer.offer_id,
+      maps_url: rawOffer.maps_url,
+      maps_image_url: rawOffer.maps_image_url,
       local_personalization: {
         source: 'local-runtime',
         status: 'ai',
         fallbackReason: null,
         runtime: GEMMA_4_WEB_RUNTIME_NAME,
       },
+      support_note: 'Nice pick - this feels like a smart little reset.',
     })
 
     shell.dispose()

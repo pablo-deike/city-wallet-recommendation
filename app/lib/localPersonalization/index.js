@@ -1,4 +1,4 @@
-import { boundEmoji, boundHeadline, boundReason } from './sanitize'
+import { boundEmoji, boundHeadline, boundReason, boundSupportNote } from './sanitize'
 import { probeLocalRuntime } from './runtime'
 
 export {
@@ -32,17 +32,34 @@ function buildPassThrough(rawOffer) {
     passThrough.merchant_id = rawOffer.merchant_id
   }
 
+  if (rawOffer?.maps_url != null) {
+    passThrough.maps_url = rawOffer.maps_url
+  }
+
+  if (rawOffer?.maps_image_url != null) {
+    passThrough.maps_image_url = rawOffer.maps_image_url
+  }
+
   return passThrough
 }
 
 function buildResult(rawOffer, displayFields, metadata) {
-  return {
+  const supportNote = boundSupportNote(
+    displayFields?.support_note ?? displayFields?.compliment ?? displayFields?.note,
+  )
+  const result = {
     headline: boundHeadline(displayFields?.headline),
     reason: boundReason(displayFields?.reason),
     emoji: boundEmoji(displayFields?.emoji),
     ...buildPassThrough(rawOffer),
     local_personalization: metadata,
   }
+
+  if (supportNote) {
+    result.support_note = supportNote
+  }
+
+  return result
 }
 
 function hasRequiredDisplayFields(result) {

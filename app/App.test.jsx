@@ -69,6 +69,7 @@ vi.mock('./lib/localPersonalization/resolveDisplayOffer', () => ({
     headline: 'Humanized coffee break nearby',
     reason: 'Gemma matched this to your local moment',
     emoji: '✨',
+    support_note: 'Nice pick - this is a good little local reset.',
     local_personalization: {
       source: 'local-runtime',
       status: 'ai',
@@ -136,6 +137,8 @@ describe('App local personalization wiring', () => {
     expect(resolveDisplayOffer).toHaveBeenCalled()
     expect(container.textContent).toContain('Humanized coffee break nearby')
     expect(container.textContent).toContain('Gemma matched this to your local moment')
+    expect(container.textContent).toContain('Nice pick - this is a good little local reset.')
+    expect(container.textContent).toContain('✨')
     expect(container.textContent).toContain('15% off any hot drink')
   })
 })

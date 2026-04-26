@@ -8,6 +8,8 @@ const rawOffer = Object.freeze({
   distance_m: 80,
   discount: '15% off any hot drink',
   valid_minutes: 18,
+  maps_url: 'https://maps.example.test/cafe',
+  maps_image_url: 'https://maps.example.test/cafe.png',
   headline: 'Cold outside? Your cappuccino is waiting.',
   reason: 'Quiet right now — offer valid for 18 minutes',
   emoji: '☕',
@@ -19,6 +21,8 @@ function expectPassThroughFields(result) {
   expect(result.discount).toBe(rawOffer.discount)
   expect(result.valid_minutes).toBe(rawOffer.valid_minutes)
   expect(result.offer_id).toBe(rawOffer.offer_id)
+  expect(result.maps_url).toBe(rawOffer.maps_url)
+  expect(result.maps_image_url).toBe(rawOffer.maps_image_url)
 }
 
 describe('humanizeOfferOnDevice', () => {
@@ -45,6 +49,8 @@ describe('humanizeOfferOnDevice', () => {
       discount: rawOffer.discount,
       valid_minutes: rawOffer.valid_minutes,
       offer_id: rawOffer.offer_id,
+      maps_url: rawOffer.maps_url,
+      maps_image_url: rawOffer.maps_image_url,
       local_personalization: {
         source: 'deterministic-passthrough',
         status: 'fallback',
@@ -64,6 +70,7 @@ describe('humanizeOfferOnDevice', () => {
         reason:
           '  Rainy <outside> means a warm reset is nearby, with extra cozy detail repeated twice. Rainy <outside> means a warm reset is nearby, with extra cozy detail repeated twice.  ',
         emoji: '🔥✨',
+        support_note: '  Great timing - you found a cozy nearby pause.  ',
       })),
     })
 
@@ -71,6 +78,7 @@ describe('humanizeOfferOnDevice', () => {
     expect(result.reason).toContain('Rainy outside means a warm reset is nearby')
     expect(result.reason).not.toContain('\n')
     expect(result.emoji).toBe('🔥')
+    expect(result.support_note).toBe('Great timing - you found a cozy nearby pause.')
     expect(result.local_personalization).toEqual({
       source: 'local-runtime',
       status: 'ai',

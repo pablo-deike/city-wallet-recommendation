@@ -9,6 +9,8 @@ const rawOffer = Object.freeze({
   distance_m: 80,
   discount: '15% off any hot drink',
   valid_minutes: 18,
+  maps_url: 'https://maps.example.test/cafe',
+  maps_image_url: 'https://maps.example.test/cafe.png',
   headline: 'Cold outside? Your cappuccino is waiting.',
   reason: 'Quiet right now — offer valid for 18 minutes',
   emoji: '☕',
@@ -21,6 +23,7 @@ describe('resolveDisplayOffer', () => {
       headline: 'Fresh break nearby',
       reason: 'Your calm coffee reset is around the corner',
       emoji: '☕',
+      support_note: 'Nice pick - this is a good little reset.',
       local_personalization: {
         source: 'local-runtime',
         status: 'ai',
@@ -39,6 +42,9 @@ describe('resolveDisplayOffer', () => {
     expect(result.reason).toBe('Your calm coffee reset is around the corner')
     expect(result.merchant_id).toBe(rawOffer.merchant_id)
     expect(result.offer_id).toBe(rawOffer.offer_id)
+    expect(result.support_note).toBe('Nice pick - this is a good little reset.')
+    expect(result.maps_url).toBe(rawOffer.maps_url)
+    expect(result.maps_image_url).toBe(rawOffer.maps_image_url)
   })
 
   it('falls back to deterministic local copy when no runtime shell is available', async () => {
@@ -47,6 +53,8 @@ describe('resolveDisplayOffer', () => {
     expect(result.headline).toBe(rawOffer.headline)
     expect(result.reason).toBe(rawOffer.reason)
     expect(result.merchant_id).toBe(rawOffer.merchant_id)
+    expect(result.maps_url).toBe(rawOffer.maps_url)
+    expect(result.maps_image_url).toBe(rawOffer.maps_image_url)
     expect(result.local_personalization).toEqual({
       source: 'deterministic-passthrough',
       status: 'fallback',

@@ -41,6 +41,11 @@ export function boundReason(value) {
   return clampText(collapseInlineWhitespace(sanitized), 140)
 }
 
+export function boundSupportNote(value) {
+  const sanitized = stripAngleBrackets(safeString(value, '')).replace(/\r\n?/g, ' ')
+  return clampText(collapseInlineWhitespace(sanitized), 90)
+}
+
 export function boundEmoji(value) {
   const [first = ''] = Array.from(stripAngleBrackets(safeString(value, '')))
   return first

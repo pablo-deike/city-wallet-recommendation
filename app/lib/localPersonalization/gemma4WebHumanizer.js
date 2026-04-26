@@ -1,4 +1,4 @@
-import { boundEmoji, boundHeadline, boundReason } from './sanitize'
+import { boundEmoji, boundHeadline, boundReason, boundSupportNote } from './sanitize'
 
 export const GEMMA_4_E2B_IT_WEB_MODEL_PATH = '/models/gemma-4-E2B-it-web.task'
 export const GEMMA_4_E4B_IT_WEB_MODEL_PATH = '/models/gemma-4-E4B-it-web.task'
@@ -41,8 +41,11 @@ function parseHumanizerResponse(value) {
 function buildPrompt(rawOffer, localContext) {
   return [
     'You rewrite one wallet offer for a phone UI.',
-    'Return only JSON with keys headline, reason, emoji.',
-    'Do not invent facts or add markdown.',
+    'Return only JSON with keys headline, reason, emoji, support_note.',
+    'Make the copy warm, encouraging, and lightly emoji-forward without feeling noisy.',
+    'Use 1-2 natural emojis total across the fields.',
+    'The support_note is a short compliment or encouragement for the user, not an extra perk.',
+    'Do not invent facts, freebies, merchant details, or add markdown.',
     `Raw offer: ${JSON.stringify(rawOffer ?? {})}`,
     `Device context: ${JSON.stringify(localContext ?? {})}`,
   ].join('\n')
@@ -61,17 +64,34 @@ function buildPassThrough(rawOffer) {
     passThrough.merchant_id = rawOffer.merchant_id
   }
 
+  if (rawOffer?.maps_url != null) {
+    passThrough.maps_url = rawOffer.maps_url
+  }
+
+  if (rawOffer?.maps_image_url != null) {
+    passThrough.maps_image_url = rawOffer.maps_image_url
+  }
+
   return passThrough
 }
 
 function buildResult(rawOffer, displayFields, metadata) {
-  return {
+  const supportNote = boundSupportNote(
+    displayFields?.support_note ?? displayFields?.compliment ?? displayFields?.note,
+  )
+  const result = {
     headline: boundHeadline(displayFields?.headline),
     reason: boundReason(displayFields?.reason),
     emoji: boundEmoji(displayFields?.emoji),
     ...buildPassThrough(rawOffer),
     local_personalization: metadata,
   }
+
+  if (supportNote) {
+    result.support_note = supportNote
+  }
+
+  return result
 }
 
 function buildFallback(rawOffer, metadata) {
@@ -109,7 +129,7 @@ export async function loadGemma4WebHumanizer(options = {}) {
     globalLike = globalThis,
     modelAssetPath = GEMMA_4_DEFAULT_WEB_MODEL_PATH,
     wasmBasePath = GEMMA_4_WEB_WASM_BASE_PATH,
-    maxTokens = 128,
+    maxTokens = 160,
     topK = 64,
     temperature = 0.8,
   } = options

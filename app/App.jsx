@@ -53,6 +53,35 @@ function getActiveOfferId(displayOffer, rawOffer) {
   return displayOffer?.offer_id ?? rawOffer?.offer_id ?? null
 }
 
+function getOfferEmoji(displayOffer) {
+  const value = typeof displayOffer?.emoji === 'string' ? displayOffer.emoji.trim() : ''
+  const [firstEmoji = '✨'] = Array.from(value)
+
+  return firstEmoji
+}
+
+function getSupportNote(displayOffer) {
+  const modelNote =
+    typeof displayOffer?.support_note === 'string' ? displayOffer.support_note.trim() : ''
+
+  if (modelNote) {
+    return modelNote
+  }
+
+  if (displayOffer?.merchant) {
+    return `Nice pick - ${displayOffer.merchant} is close by.`
+  }
+
+  return 'Nice pick - a quick local treat is close by.'
+}
+
+function getOfferEmojiSet(displayOffer) {
+  return [getOfferEmoji(displayOffer), '😊', '✨']
+    .filter(Boolean)
+    .filter((emoji, index, emojis) => emojis.indexOf(emoji) === index)
+    .slice(0, 3)
+}
+
 // ── Vanilla Leaflet map ───────────────────────────────────────────────────────
 function LeafletMap({ userLocation, cafeLocation }) {
   const containerRef = useRef(null)
@@ -144,6 +173,9 @@ export default function App() {
     () => buildLocalContext(userLocation, history),
     [userLocation, history],
   )
+  const offerEmoji = getOfferEmoji(offer)
+  const offerEmojiSet = getOfferEmojiSet(offer)
+  const supportNote = getSupportNote(offer)
 
   // Parse discount % from strings like "15% off any hot drink"
   const discountPct = offer ? (parseInt(offer.discount) || 0) : 0
@@ -303,7 +335,12 @@ export default function App() {
                     </div>
                     <div style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                        <MapThumb mapsUrl={offer.maps_url} mapsImageUrl={offer.maps_image_url} size={56} />
+                        <div style={{ position: 'relative', width: 56, height: 56, flexShrink: 0 }}>
+                          <MapThumb mapsUrl={offer.maps_url} mapsImageUrl={offer.maps_image_url} size={56} />
+                          <div aria-hidden="true" style={{ position: 'absolute', right: -6, bottom: -6, width: 28, height: 28, borderRadius: 14, background: '#fff7ed', border: '1px solid #fed7aa', boxShadow: '0 6px 14px rgba(15,23,42,0.14)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>
+                            {offerEmoji}
+                          </div>
+                        </div>
                         <div style={{ flex: 1, minWidth: 0 }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
                             <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase', color: '#6b7280', margin: 0 }}>{offer.merchant}</p>
@@ -316,6 +353,16 @@ export default function App() {
                       {offer.reason && (
                         <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.4, color: '#6b7280' }}>{offer.reason}</p>
                       )}
+                      <div style={{ marginTop: 10, display: 'flex', alignItems: 'center', gap: 8, background: '#fff7ed', border: '1px solid #fed7aa', borderRadius: 12, padding: '8px 10px' }}>
+                        <div aria-hidden="true" style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>
+                          {offerEmojiSet.map((emoji, index) => (
+                            <span key={`${emoji}-${index}`} style={{ width: 22, height: 22, marginLeft: index === 0 ? 0 : -6, borderRadius: 11, background: '#ffffff', border: '1px solid #fed7aa', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, boxShadow: '0 2px 8px rgba(15,23,42,0.08)' }}>
+                              {emoji}
+                            </span>
+                          ))}
+                        </div>
+                        <p style={{ margin: 0, fontSize: 12, lineHeight: 1.35, color: '#92400e', fontWeight: 700 }}>{supportNote}</p>
+                      </div>
                       <div style={{ marginTop: 14, display: 'flex', alignItems: 'center', gap: 10 }}>
                         <button onClick={handleAccept} style={{ flex: 1, background: '#5b9af5', color: 'white', border: 'none', borderRadius: 12, padding: '13px 0', fontSize: 14, fontWeight: 700, cursor: 'pointer', boxShadow: '0 4px 16px rgba(91,154,245,0.3)' }}>Accept</button>
                         <button onClick={handleReject} style={{ padding: '13px 18px', fontSize: 14, fontWeight: 700, color: '#6b7280', background: 'none', border: 'none', cursor: 'pointer' }}>Reject</button>
