@@ -4,12 +4,12 @@ import asyncio
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 
 import httpx
 import polars as pl
+from src.backend.config import PLACE_TYPES, ApiConfig, GridConfig
 
-from src.backend.config import PLACE_TYPES, ApiConfig, Filepaths, GridConfig
+from src.backend import db
 
 PLACES_API_URL = "https://places.googleapis.com/v1/places:searchNearby"
 WEATHER_API_URL = "https://weather.googleapis.com/v1/currentConditions:lookup"
@@ -41,39 +41,6 @@ class Config:
         if not api_key:
             raise ValueError("GOOGLE_PLACES_WEATHER_API_KEY, GOOGLE_API_KEY, or GEMINI_API_KEY not set in environment")
         return cls(google_api_key=api_key)
-
-
-def _ensure_data_dir() -> Path:
-    Filepaths.GOOGLE_DATA.mkdir(parents=True, exist_ok=True)
-    return Filepaths.GOOGLE_DATA
-
-
-def save_to_parquet(merchants_df: pl.DataFrame, weather_df: pl.DataFrame) -> tuple[Path, Path]:
-    data_dir = _ensure_data_dir()
-
-    merchants_path = data_dir / "merchants.parquet"
-    weather_path = data_dir / "weather.parquet"
-
-    merchants_df.write_parquet(merchants_path)
-    weather_df.write_parquet(weather_path)
-
-    return merchants_path, weather_path
-
-
-def load_from_parquet() -> tuple[pl.DataFrame | None, pl.DataFrame | None]:
-    merchants_path = Filepaths.GOOGLE_DATA / "merchants.parquet"
-    weather_path = Filepaths.GOOGLE_DATA / "weather.parquet"
-
-    merchants_df = None
-    weather_df = None
-
-    if merchants_path.exists():
-        merchants_df = pl.read_parquet(merchants_path)
-
-    if weather_path.exists():
-        weather_df = pl.read_parquet(weather_path)
-
-    return merchants_df, weather_df
 
 
 async def _fetch_places_page(
@@ -236,6 +203,7 @@ async def fetch_all(config: Config) -> tuple[pl.DataFrame, pl.DataFrame]:
         fetch_weather(config),
     )
 
-    save_to_parquet(merchants, weather)
+    db.save_merchants(merchants)
+    db.save_weather(weather)
 
     return merchants, weather
