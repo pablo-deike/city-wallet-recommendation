@@ -20,6 +20,8 @@ __pycache__/
 venv/
 .venv/
 env/
+*__init__*
+.env*
 
 # Logs
 *.log
