@@ -120,6 +120,7 @@ function buildUnavailableShell(reason = 'webgpu-unavailable') {
     runtime: GEMMA_4_WEB_RUNTIME_NAME,
     reason,
     invokeRuntime: null,
+    invokePrompt: null,
     dispose() {},
   }
 }
@@ -156,6 +157,9 @@ export async function loadGemma4WebHumanizer(options = {}) {
     available: true,
     runtime: GEMMA_4_WEB_RUNTIME_NAME,
     reason: null,
+    async invokePrompt(prompt) {
+      return llm.generateResponse(prompt)
+    },
     async invokeRuntime(rawOffer, localContext = {}) {
       try {
         const responseText = await llm.generateResponse(

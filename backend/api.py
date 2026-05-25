@@ -2,6 +2,7 @@ from datetime import datetime
 import json
 import math
 import os
+import re
 import sqlite3
 import uuid
 from urllib.parse import urlencode
@@ -222,64 +223,35 @@ class SearchMerchantsPayload(BaseModel):
     radius: int = 5000
 
 
+class RecommendationPayload(BaseModel):
+    lat: float
+    lon: float
+    radius_km: float = 1.0
+    count: int = 3
+    prompt: str | None = None
+
+
 PUBLIC_API_BASE_URL = os.environ.get("PUBLIC_API_BASE_URL", "http://localhost:8000")
 
-GOOGLE_PLACES_BY_MERCHANT = {
-    "cafe_mueller": {"place_id": "ChIJN1t_tDeuEmsRUsoyG83frY4"},
-}
-
-
-def build_google_maps_source_image_url(merchant_id: str, lat: float, lon: float) -> str:
-    api_key = os.environ.get("GOOGLE_PLACES_WEATHER_API_KEY") or os.environ.get("GOOGLE_MAPS_API_KEY")
-    place_meta = GOOGLE_PLACES_BY_MERCHANT.get(merchant_id)
-
-    if place_meta and place_meta.get("place_id") and api_key:
-        place_id = place_meta["place_id"]
-        details_params = urlencode({"place_id": place_id, "fields": "photos", "key": api_key})
-        details_url = f"https://maps.googleapis.com/maps/api/place/details/json?{details_params}"
-        try:
-            request = UrlRequest(details_url, headers={"User-Agent": "Mozilla/5.0"})
-            with urlopen(request, timeout=3) as response:
-                data = json.loads(response.read().decode("utf-8"))
-            photos = data.get("result", {}).get("photos", [])
-            if photos:
-                photo_reference = photos[0].get("photo_reference")
-                if photo_reference:
-                    photo_params = urlencode({"maxwidth": 800, "photo_reference": photo_reference, "key": api_key})
-                    return f"https://maps.googleapis.com/maps/api/place/photo?{photo_params}"
-        except Exception:
-            pass
-
-    if not api_key:
-        print("WARNING: GOOGLE_PLACES_WEATHER_API_KEY / GOOGLE_MAPS_API_KEY not set")
-
+def build_osm_static_map_url(lat: float, lon: float) -> str:
     static_params = urlencode({
         "center": f"{lat},{lon}",
         "zoom": 15,
         "size": "400x200",
-        "markers": f"color:red|{lat},{lon}",
-        "key": api_key or "",
+        "markers": f"{lat},{lon},red-pushpin",
     })
-    return f"https://maps.googleapis.com/maps/api/staticmap?{static_params}"
+    return f"https://staticmap.openstreetmap.de/staticmap.php?{static_params}"
 
 
-def build_google_maps_assets(merchant_id: str, lat: float, lon: float) -> tuple[str, str]:
-    place_meta = GOOGLE_PLACES_BY_MERCHANT.get(merchant_id)
-
-    if place_meta and place_meta.get("place_id"):
-        place_id = place_meta["place_id"]
-        maps_url = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}&query_place_id={place_id}"
-    else:
-        maps_url = f"https://www.google.com/maps/search/?api=1&query={lat},{lon}"
-
+def build_maps_assets(merchant_id: str, lat: float, lon: float) -> tuple[str, str]:
+    maps_url = f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}&zoom=15"
     maps_image_url = f"{PUBLIC_API_BASE_URL}/maps/place-image/{merchant_id}?lat={lat}&lon={lon}"
-
     return maps_url, maps_image_url
 
 
 @app.get("/maps/place-image/{merchant_id}")
 def get_place_image(merchant_id: str, lat: float, lon: float):
-    image_source_url = build_google_maps_source_image_url(merchant_id, lat, lon)
+    image_source_url = build_osm_static_map_url(lat, lon)
 
     try:
         request = UrlRequest(image_source_url, headers={"User-Agent": "Mozilla/5.0"})
@@ -652,7 +624,7 @@ def generate_offer(ctx: ContextPayload):
     """, (merchant_id,))
     conn.commit()
 
-    maps_url, maps_image_url = build_google_maps_assets(merchant_id, lat, lon)
+    maps_url, maps_image_url = build_maps_assets(merchant_id, lat, lon)
 
     return {
         "offer_id": offer_id,
@@ -1311,47 +1283,83 @@ def get_nearby_merchants(lat: float, lon: float, radius_km: float = 1.0):
         return {"count": 0, "merchants": [], "error": str(e)}
 
 
+@app.post("/api/recommendations/nearby")
+def recommend_nearby_merchants(body: RecommendationPayload):
+    try:
+        google_db.init_db()
+        df = google_db.filter_merchants_by_distance(body.lat, body.lon, body.radius_km)
+        df = df.sort("distance_km")
+        merchants = []
+        for row in df.to_dicts():
+            merchants.append({
+                "id": row.get("place_id") or row.get("name"),
+                "name": row.get("name"),
+                "lat": row.get("lat"),
+                "lon": row.get("lon"),
+                "address": row.get("address"),
+                "distance_km": round(row.get("distance_km", 0), 2),
+                "rating": row.get("rating"),
+                "types": row.get("types", []),
+                "primary_type": row.get("primary_type"),
+            })
+        count = max(1, min(body.count, 10))
+        return {
+            "count": min(len(merchants), count),
+            "recommendations": merchants[:count],
+            "source": "distance_ranking",
+        }
+    except Exception as e:
+        return {"count": 0, "recommendations": [], "error": str(e)}
+
+
 @app.post("/api/merchants/search")
 async def search_merchants(body: SearchMerchantsPayload):
-    api_key = os.environ.get("GOOGLE_PLACES_WEATHER_API_KEY") or os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        return {"count": 0, "places": [], "error": "No API key configured"}
-
-    url = "https://places.googleapis.com/v1/places:searchText"
-    headers = {
-        "X-Goog-Api-Key": api_key,
-        "X-Goog-FieldMask": "places.id,places.displayName,places.location,places.formattedAddress,places.types,places.rating",
-        "Content-Type": "application/json",
-    }
-    body_json = {
-        "textQuery": body.query,
-        "locationBias": {
-            "circle": {
-                "center": {"latitude": body.lat, "longitude": body.lon},
-                "radius": body.radius,
-            }
-        },
-        "maxResultCount": 20,
-    }
-
+    # Use Overpass API (OpenStreetMap) — free, no API key required
+    safe_query = re.escape(body.query)
+    overpass_query = f"""
+[out:json][timeout:15];
+(
+  node["name"~"{safe_query}",i](around:{body.radius},{body.lat},{body.lon});
+  way["name"~"{safe_query}",i](around:{body.radius},{body.lat},{body.lon});
+  relation["name"~"{safe_query}",i](around:{body.radius},{body.lat},{body.lon});
+);
+out center 20;
+"""
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(url, headers=headers, json=body_json)
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.post(
+                "https://overpass-api.de/api/interpreter",
+                data={"data": overpass_query},
+                headers={"User-Agent": "CityWalletApp/1.0"},
+            )
             data = resp.json()
-            places = data.get("places", [])
-            results = []
-            for p in places:
-                loc = p.get("location", {})
-                results.append({
-                    "place_id": p.get("id"),
-                    "name": p.get("displayName", {}).get("text", ""),
-                    "lat": loc.get("latitude"),
-                    "lon": loc.get("longitude"),
-                    "address": p.get("formattedAddress", ""),
-                    "types": p.get("types", []),
-                    "rating": p.get("rating"),
-                })
-            return {"count": len(results), "places": results}
+        results = []
+        for el in data.get("elements", []):
+            tags = el.get("tags", {})
+            name = tags.get("name")
+            if not name:
+                continue
+            lat = el.get("lat") or el.get("center", {}).get("lat")
+            lon = el.get("lon") or el.get("center", {}).get("lon")
+            if lat is None or lon is None:
+                continue
+            addr_parts = [
+                tags.get("addr:street", ""),
+                tags.get("addr:housenumber", ""),
+                tags.get("addr:city", ""),
+            ]
+            address = " ".join(p for p in addr_parts if p)
+            place_type = tags.get("amenity") or tags.get("shop") or tags.get("leisure") or tags.get("tourism") or "place"
+            results.append({
+                "place_id": f"osm:{el['type']}:{el['id']}",
+                "name": name,
+                "lat": lat,
+                "lon": lon,
+                "address": address,
+                "types": [place_type],
+                "rating": None,
+            })
+        return {"count": len(results), "places": results}
     except Exception as e:
         return {"count": 0, "places": [], "error": str(e)}
 

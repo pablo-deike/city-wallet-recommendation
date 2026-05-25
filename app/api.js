@@ -127,6 +127,16 @@ export function getNearbyMerchants(lat, lon, radiusKm = 1) {
   return get(`/api/merchants/nearby?lat=${lat}&lon=${lon}&radius_km=${radiusKm}`)
 }
 
+export function recommendNearbyMerchants(lat, lon, radiusKm = 1, options = {}) {
+  return post('/api/recommendations/nearby', {
+    lat,
+    lon,
+    radius_km: radiusKm,
+    count: options.count ?? 3,
+    prompt: options.prompt ?? '',
+  })
+}
+
 export function searchMerchants(query, lat, lon, radius = 5000) {
   return post('/api/merchants/search', { query, lat, lon, radius })
 }

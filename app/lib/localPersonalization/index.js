@@ -11,6 +11,18 @@ export {
   loadGemma4WebHumanizer,
 } from './gemma4WebHumanizer'
 
+export function localRuntimeCanGenerate(runtimeShell) {
+  return Boolean(runtimeShell?.available && typeof runtimeShell.invokePrompt === 'function')
+}
+
+export async function generateLocalText(runtimeShell, prompt) {
+  if (!localRuntimeCanGenerate(runtimeShell)) {
+    throw new Error('local-runtime-unavailable')
+  }
+
+  return runtimeShell.invokePrompt(prompt)
+}
+
 function publicFallbackReason(reason) {
   if (!reason || reason === 'no-local-runtime') {
     return 'runtime-unavailable'

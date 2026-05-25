@@ -4,8 +4,8 @@ import { Compass, Clock, MapPin, Sliders, Sparkles } from 'lucide-react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { QRCodeSVG } from 'qrcode.react'
-import { generateOffer, claimOffer, redeemOffer, dismissOffer, getNearbyMerchants } from './api'
-import { loadGemma4WebHumanizer } from './lib/localPersonalization'
+import { generateOffer, claimOffer, redeemOffer, dismissOffer, getNearbyMerchants, recommendNearbyMerchants } from './api'
+import { loadGemma4WebHumanizer, localRuntimeCanGenerate, generateLocalText } from './lib/localPersonalization'
 import { resolveDisplayOffer } from './lib/localPersonalization/resolveDisplayOffer'
 import {
   appendPreferenceEntry,
@@ -20,13 +20,17 @@ import vicoLogo from './images/vico-logo.svg'
 
 const DEFAULT_LOC = { lat: 48.1351, lon: 11.5820 }
 const BASE_PRICE = 4.90
+const DEFAULT_RECOMMENDATION_COUNT = 3
 
 // ── Small tappable map thumbnail ─────────────────────────────────────────────
-function MapThumb({ mapsUrl, mapsImageUrl, size = 56, radius = 10 }) {
+function MapThumb({ mapsUrl, size = 56, radius = 10 }) {
   return (
     <a href={mapsUrl} target="_blank" rel="noopener noreferrer"
-      style={{ display: 'block', width: size, height: size, borderRadius: radius, overflow: 'hidden', flexShrink: 0, border: '1px solid #dbe3ef' }}>
-      <img src={mapsImageUrl} alt="map" style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: size, height: size, borderRadius: radius, flexShrink: 0, border: '1px solid #dbe3ef', background: '#f0f4f8', textDecoration: 'none' }}>
+      <svg width={size * 0.5} height={size * 0.5} viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7z" fill="#e74c3c"/>
+        <circle cx="12" cy="9" r="2.5" fill="white"/>
+      </svg>
     </a>
   )
 }
@@ -101,6 +105,102 @@ function getOfferEmojiSet(displayOffer) {
     .filter(Boolean)
     .filter((emoji, index, emojis) => emojis.indexOf(emoji) === index)
     .slice(0, 3)
+}
+
+function formatDistanceKm(distanceKm) {
+  if (typeof distanceKm !== 'number' || Number.isNaN(distanceKm)) {
+    return ''
+  }
+  if (distanceKm < 1) {
+    return `${Math.round(distanceKm * 1000)} m`
+  }
+  return `${distanceKm.toFixed(1)} km`
+}
+
+function buildRecommendationPrompt({ lat, lon, radiusKm, merchants, locale }) {
+  const condensed = (merchants || [])
+    .map(m => {
+      const distance = typeof m.distance_km === 'number' ? m.distance_km : null
+      const rating = typeof m.rating === 'number' ? m.rating : null
+      const primaryType = m.primary_type || (Array.isArray(m.types) ? m.types[0] : null)
+
+      return {
+        id: m.place_id || m.name,
+        name: m.name,
+        distance_km: distance,
+        rating,
+        primary_type: primaryType,
+      }
+    })
+    .filter(m => m.name)
+
+  return [
+    'You are an on-device recommender for nearby businesses.',
+    'Return only JSON. No markdown, no extra text.',
+    'Pick the top 3 merchants for a casual wallet offer discovery.',
+    'We only have location context right now. Use distance as the primary signal, and rating as a tiebreaker.',
+    'Respond as: {"recommendations":[{"id":"","summary":""},...]}',
+    `User location: ${JSON.stringify({ lat, lon, radius_km: radiusKm, locale })}`,
+    `Merchants: ${JSON.stringify(condensed)}`,
+  ].join('\n')
+}
+
+function parseRecommendationResponse(value, fallbackIds) {
+  const trimmed = typeof value === 'string' ? value.trim() : ''
+  const start = trimmed.indexOf('{')
+  const end = trimmed.lastIndexOf('}')
+  if (start < 0 || end <= start) {
+    return fallbackIds
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed.slice(start, end + 1))
+    const recs = Array.isArray(parsed?.recommendations) ? parsed.recommendations : []
+    const ids = recs.map(rec => rec?.id).filter(Boolean)
+    return ids.length ? ids : fallbackIds
+  } catch {
+    return fallbackIds
+  }
+}
+
+function applyRecommendationOrder(merchants, recommendedIds) {
+  if (!Array.isArray(merchants) || merchants.length === 0) return []
+  if (!Array.isArray(recommendedIds) || recommendedIds.length === 0) return merchants
+
+  const indexById = new Map()
+  recommendedIds.forEach((id, index) => {
+    indexById.set(id, index)
+  })
+
+  return [...merchants].sort((a, b) => {
+    const aKey = a.place_id || a.name
+    const bKey = b.place_id || b.name
+    const aIndex = indexById.has(aKey) ? indexById.get(aKey) : Number.MAX_SAFE_INTEGER
+    const bIndex = indexById.has(bKey) ? indexById.get(bKey) : Number.MAX_SAFE_INTEGER
+    if (aIndex !== bIndex) return aIndex - bIndex
+
+    const aDistance = typeof a.distance_km === 'number' ? a.distance_km : Number.POSITIVE_INFINITY
+    const bDistance = typeof b.distance_km === 'number' ? b.distance_km : Number.POSITIVE_INFINITY
+    if (aDistance !== bDistance) return aDistance - bDistance
+
+    const aRating = typeof a.rating === 'number' ? a.rating : 0
+    const bRating = typeof b.rating === 'number' ? b.rating : 0
+    return bRating - aRating
+  })
+}
+
+function buildFallbackRecommendation(merchants, count) {
+  return [...(merchants || [])]
+    .sort((a, b) => {
+      const aDistance = typeof a.distance_km === 'number' ? a.distance_km : Number.POSITIVE_INFINITY
+      const bDistance = typeof b.distance_km === 'number' ? b.distance_km : Number.POSITIVE_INFINITY
+      if (aDistance !== bDistance) return aDistance - bDistance
+
+      const aRating = typeof a.rating === 'number' ? a.rating : 0
+      const bRating = typeof b.rating === 'number' ? b.rating : 0
+      return bRating - aRating
+    })
+    .slice(0, count)
 }
 
 // ── Vanilla Leaflet map ───────────────────────────────────────────────────────
@@ -223,6 +323,8 @@ export default function App() {
   const [onboardingShown, setOnboardingShown] = useState(false)
   const [radiusKm, setRadiusKm] = useState(1)
   const [merchants, setMerchants] = useState([])
+  const [recommendations, setRecommendations] = useState([])
+  const [recommendationState, setRecommendationState] = useState('idle')
 
   const preferenceIntent = useMemo(() => mergePreferenceIntent(preferenceHistory), [preferenceHistory])
   const cafeLocation = offer?.merchant_lat && offer?.merchant_lon ? { lat: offer.merchant_lat, lon: offer.merchant_lon } : null
@@ -241,6 +343,54 @@ export default function App() {
   const fetchOfferForLocation = useCallback(
     (lat, lon) => generateOffer(lat, lon).then(setRawOffer).catch(() => {}),
     [],
+  )
+
+  const fetchRecommendations = useCallback(
+    async (lat, lon, runtimeShell, list) => {
+      const sourceMerchants = Array.isArray(list) ? list : []
+      if (sourceMerchants.length === 0) {
+        setRecommendations([])
+        setRecommendationState('empty')
+        return
+      }
+
+      const fallback = buildFallbackRecommendation(sourceMerchants, DEFAULT_RECOMMENDATION_COUNT)
+      const fallbackIds = fallback.map(m => m.place_id || m.name)
+
+      setRecommendationState('loading')
+
+      if (localRuntimeCanGenerate(runtimeShell)) {
+        try {
+          const prompt = buildRecommendationPrompt({
+            lat,
+            lon,
+            radiusKm,
+            merchants: sourceMerchants,
+            locale: getBrowserLocale(),
+          })
+          const response = await generateLocalText(runtimeShell, prompt)
+          const recommendedIds = parseRecommendationResponse(response, fallbackIds)
+          const ranked = applyRecommendationOrder(sourceMerchants, recommendedIds)
+          setRecommendations(ranked.slice(0, DEFAULT_RECOMMENDATION_COUNT))
+          setRecommendationState('ready')
+          return
+        } catch {
+          // fall through to API / fallback
+        }
+      }
+
+      try {
+        const response = await recommendNearbyMerchants(lat, lon, radiusKm, { count: DEFAULT_RECOMMENDATION_COUNT })
+        const recommendedIds = Array.isArray(response?.recommendations) ? response.recommendations.map(rec => rec?.id).filter(Boolean) : []
+        const ranked = applyRecommendationOrder(sourceMerchants, recommendedIds.length ? recommendedIds : fallbackIds)
+        setRecommendations(ranked.slice(0, DEFAULT_RECOMMENDATION_COUNT))
+        setRecommendationState('ready')
+      } catch {
+        setRecommendations(fallback)
+        setRecommendationState('ready')
+      }
+    },
+    [radiusKm],
   )
 
   const handleAddPreferenceEntry = useCallback(({ source, content }) => {
@@ -274,10 +424,17 @@ export default function App() {
     if (preferenceSheetMode === 'onboarding') return
     if (userLocation) return
 
-    const fetchInitialData = (lat, lon) => {
-      fetchOfferForLocation(lat, lon)
-      getNearbyMerchants(lat, lon, radiusKm).then(res => setMerchants(res.merchants || [])).catch(() => setMerchants([]))
-    }
+      const fetchInitialData = (lat, lon) => {
+        fetchOfferForLocation(lat, lon)
+        getNearbyMerchants(lat, lon, radiusKm).then(res => {
+          const nearby = res.merchants || []
+          setMerchants(nearby)
+          fetchRecommendations(lat, lon, localRuntime, nearby)
+        }).catch(() => {
+          setMerchants([])
+          setRecommendations([])
+        })
+      }
 
     if (!navigator.geolocation) {
       setUserLocation(DEFAULT_LOC)
@@ -358,8 +515,15 @@ export default function App() {
 
   useEffect(() => {
     if (!userLocation) return
-    getNearbyMerchants(userLocation.lat, userLocation.lon, radiusKm).then(res => setMerchants(res.merchants || [])).catch(() => setMerchants([]))
-  }, [radiusKm, userLocation])
+    getNearbyMerchants(userLocation.lat, userLocation.lon, radiusKm).then(res => {
+      const nearby = res.merchants || []
+      setMerchants(nearby)
+      fetchRecommendations(userLocation.lat, userLocation.lon, localRuntime, nearby)
+    }).catch(() => {
+      setMerchants([])
+      setRecommendations([])
+    })
+  }, [radiusKm, userLocation, localRuntime, fetchRecommendations])
 
   useEffect(() => {
     if (screen !== 'dismissed') return
@@ -395,7 +559,6 @@ export default function App() {
         merchant: offer.merchant,
         discount: offer.discount,
         mapsUrl: offer.maps_url,
-        mapsImageUrl: offer.maps_image_url,
         youPay,
         date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
         qrToken: qrData?.qr_token,
@@ -515,7 +678,7 @@ export default function App() {
                     <div style={{ padding: '14px 16px' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
                         <div style={{ position: 'relative', width: 56, height: 56, flexShrink: 0 }}>
-                          <MapThumb mapsUrl={offer.maps_url} mapsImageUrl={offer.maps_image_url} size={56} />
+                          <MapThumb mapsUrl={offer.maps_url} size={56} />
                           <div aria-hidden="true" style={{ position: 'absolute', right: -6, bottom: -6, width: 28, height: 28, borderRadius: 14, background: '#fff7ed', border: '1px solid #fed7aa', boxShadow: '0 6px 14px rgba(15,23,42,0.14)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>
                             {offerEmoji}
                           </div>
@@ -552,6 +715,35 @@ export default function App() {
               )}
             </AnimatePresence>
 
+            {/* Recommendations */}
+            <div style={{ position: 'absolute', right: 16, bottom: screen === 'offer' && offer ? 220 : 24, zIndex: 900, width: 210, display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ background: 'rgba(255,255,255,0.96)', border: '1px solid #dbe3ef', borderRadius: 14, padding: '10px 12px', boxShadow: '0 8px 20px rgba(15,23,42,0.12)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: '#6b7280' }}>Nearby picks</div>
+                <div style={{ fontSize: 12, color: '#111827', marginTop: 4, fontWeight: 600 }}>
+                  {recommendationState === 'loading' ? 'Curating suggestions...' : 'Handpicked for you'}
+                </div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {recommendations.map((merchant, index) => (
+                  <div key={`${merchant.place_id || merchant.name}-${index}`} style={{ background: '#ffffff', border: '1px solid #dbe3ef', borderRadius: 14, padding: '10px 12px', boxShadow: '0 6px 18px rgba(15,23,42,0.08)' }}>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: '#111827', lineHeight: 1.2 }}>{merchant.name}</div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 6, fontSize: 11, color: '#6b7280' }}>
+                      <MapPin size={12} style={{ color: '#5b9af5' }} />
+                      <span>{formatDistanceKm(merchant.distance_km) || 'Nearby'}</span>
+                      {merchant.rating ? (
+                        <span style={{ marginLeft: 'auto', fontWeight: 700, color: '#f97316' }}>★ {merchant.rating.toFixed(1)}</span>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+                {recommendations.length === 0 && recommendationState !== 'loading' && (
+                  <div style={{ background: '#ffffff', border: '1px dashed #dbe3ef', borderRadius: 14, padding: '12px', fontSize: 12, color: '#9ca3af', textAlign: 'center' }}>
+                    No nearby picks yet
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Dismiss toast */}
             <AnimatePresence>
               {screen === 'dismissed' && (
@@ -586,7 +778,7 @@ export default function App() {
 
                     {/* Offer summary */}
                     <div style={{ background: '#ffffff', border: '1px solid #dbe3ef', borderRadius: 16, padding: '16px 20px', display: 'flex', alignItems: 'center', gap: 14 }}>
-                      <MapThumb mapsUrl={offer?.maps_url} mapsImageUrl={offer?.maps_image_url} size={52} />
+                      <MapThumb mapsUrl={offer?.maps_url} size={52} />
                       <div>
                         <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>{offer?.merchant}</div>
                         <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{offer?.discount}</div>
@@ -682,7 +874,7 @@ export default function App() {
               history.map(item => (
                 <div key={item.id} style={{ background: '#ffffff', border: '1px solid #dbe3ef', borderRadius: 16, overflow: 'hidden' }}>
                   <div style={{ padding: '14px 16px', display: 'flex', alignItems: 'center', gap: 12 }}>
-                    <MapThumb mapsUrl={item.mapsUrl} mapsImageUrl={item.mapsImageUrl} size={48} radius={8} />
+                    <MapThumb mapsUrl={item.mapsUrl} size={48} radius={8} />
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: 13, fontWeight: 700, color: '#111827' }}>{item.merchant}</div>
                       <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>{item.discount}</div>
