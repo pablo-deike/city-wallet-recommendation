@@ -4,8 +4,9 @@ import { Compass, Clock, MapPin, Sliders, Sparkles } from 'lucide-react'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { QRCodeSVG } from 'qrcode.react'
-import { generateOffer, claimOffer, redeemOffer, dismissOffer, getNearbyMerchants, recommendNearbyMerchants } from './api'
+import { generateOffer, generateOfferCandidates, claimOffer, redeemOffer, dismissOffer, getNearbyMerchants, recommendNearbyMerchants } from './api'
 import { loadGemma4WebHumanizer, localRuntimeCanGenerate, generateLocalText } from './lib/localPersonalization'
+import { rankOffersOnDevice } from './lib/localPersonalization/gemma4Ranker'
 import { resolveDisplayOffer } from './lib/localPersonalization/resolveDisplayOffer'
 import {
   appendPreferenceEntry,
@@ -117,7 +118,7 @@ function formatDistanceKm(distanceKm) {
   return `${distanceKm.toFixed(1)} km`
 }
 
-function buildRecommendationPrompt({ lat, lon, radiusKm, merchants, locale }) {
+function buildRecommendationPrompt({ lat, lon, radiusKm, merchants, locale, userPrefs }) {
   const condensed = (merchants || [])
     .map(m => {
       const distance = typeof m.distance_km === 'number' ? m.distance_km : null
@@ -134,13 +135,19 @@ function buildRecommendationPrompt({ lat, lon, radiusKm, merchants, locale }) {
     })
     .filter(m => m.name)
 
+  const prefContext = {
+    intent: userPrefs?.intent ?? '',
+    recentEntries: (userPrefs?.entries ?? []).slice(0, 3).map(e => e.content).filter(Boolean),
+  }
+
   return [
     'You are an on-device recommender for nearby businesses.',
     'Return only JSON. No markdown, no extra text.',
     'Pick the top 3 merchants for a casual wallet offer discovery.',
-    'We only have location context right now. Use distance as the primary signal, and rating as a tiebreaker.',
+    'Use distance and rating as primary signals, then adjust for user preferences if they hint at a category.',
     'Respond as: {"recommendations":[{"id":"","summary":""},...]}',
     `User location: ${JSON.stringify({ lat, lon, radius_km: radiusKm, locale })}`,
+    `User preferences: ${JSON.stringify(prefContext)}`,
     `Merchants: ${JSON.stringify(condensed)}`,
   ].join('\n')
 }
@@ -341,8 +348,24 @@ export default function App() {
   const youPay = parseFloat((BASE_PRICE - savings).toFixed(2))
 
   const fetchOfferForLocation = useCallback(
-    (lat, lon) => generateOffer(lat, lon).then(setRawOffer).catch(() => {}),
-    [],
+    async (lat, lon) => {
+      try {
+        const result = await generateOfferCandidates(lat, lon, 5)
+        const raw = Array.isArray(result?.candidates) ? result.candidates : []
+        if (raw.length === 0) {
+          return generateOffer(lat, lon).then(setRawOffer).catch(() => {})
+        }
+        const ranked = await rankOffersOnDevice(
+          localRuntimeReady ? localRuntime : null,
+          raw,
+          { intent: preferenceIntent, entries: preferenceHistory },
+        )
+        setRawOffer(ranked[0] ?? raw[0])
+      } catch {
+        generateOffer(lat, lon).then(setRawOffer).catch(() => {})
+      }
+    },
+    [localRuntime, localRuntimeReady, preferenceIntent, preferenceHistory],
   )
 
   const fetchRecommendations = useCallback(
@@ -367,6 +390,7 @@ export default function App() {
             radiusKm,
             merchants: sourceMerchants,
             locale: getBrowserLocale(),
+            userPrefs: { intent: preferenceIntent, entries: preferenceHistory },
           })
           const response = await generateLocalText(runtimeShell, prompt)
           const recommendedIds = parseRecommendationResponse(response, fallbackIds)
@@ -390,7 +414,7 @@ export default function App() {
         setRecommendationState('ready')
       }
     },
-    [radiusKm],
+    [radiusKm, preferenceIntent, preferenceHistory],
   )
 
   const handleAddPreferenceEntry = useCallback(({ source, content }) => {

@@ -11,6 +11,8 @@ export {
   loadGemma4WebHumanizer,
 } from './gemma4WebHumanizer'
 
+export { rankOffersOnDevice } from './gemma4Ranker'
+
 export function localRuntimeCanGenerate(runtimeShell) {
   return Boolean(runtimeShell?.available && typeof runtimeShell.invokePrompt === 'function')
 }

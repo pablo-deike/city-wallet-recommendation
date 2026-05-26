@@ -13,6 +13,9 @@ dist-ssr/
 .env.local
 .env.*.local
 
+# Database files
+*.db
+
 # Python
 __pycache__/
 *.py[cod]

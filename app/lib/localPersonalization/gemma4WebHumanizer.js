@@ -2,7 +2,7 @@ import { boundEmoji, boundHeadline, boundReason, boundSupportNote } from './sani
 
 export const GEMMA_4_E2B_IT_WEB_MODEL_PATH = '/models/gemma-4-E2B-it-web.task'
 export const GEMMA_4_E4B_IT_WEB_MODEL_PATH = '/models/gemma-4-E4B-it-web.task'
-export const GEMMA_4_DEFAULT_WEB_MODEL_PATH = GEMMA_4_E4B_IT_WEB_MODEL_PATH
+export const GEMMA_4_DEFAULT_WEB_MODEL_PATH = GEMMA_4_E2B_IT_WEB_MODEL_PATH
 export const GEMMA_4_WEB_WASM_BASE_PATH =
   'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-genai/wasm'
 export const GEMMA_4_WEB_RUNTIME_NAME = 'mediapipe-gemma-4-web'

@@ -41,6 +41,17 @@ export function generateOffer(lat, lon) {
   })
 }
 
+export function generateOfferCandidates(lat, lon, count = 5) {
+  return post('/offers/generate-candidates', {
+    user_id:     USER_ID,
+    lat,
+    lon,
+    weather:     'overcast',
+    temperature: 11,
+    count,
+  })
+}
+
 export function claimOffer(offerId) {
   return post(`/offers/${offerId}/claim`, { user_id: USER_ID })
 }

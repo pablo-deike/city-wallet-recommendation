@@ -36,8 +36,6 @@ from backend.rules import (
     evaluate_special_offers,
 )
 
-from src.backend import db as google_db
-
 app = FastAPI(title="City Wallet API")
 
 
@@ -645,6 +643,105 @@ def generate_offer(ctx: ContextPayload):
         "maps_url": maps_url,
         "maps_image_url": maps_image_url,
     }
+
+class CandidatesPayload(BaseModel):
+    user_id: str
+    lat: float
+    lon: float
+    weather: str
+    temperature: int
+    count: int = 5
+
+
+@app.post("/offers/generate-candidates")
+def generate_offer_candidates(ctx: CandidatesPayload):
+    cursor.execute("""
+    SELECT merchant_id, name, lat, lon, max_discount, quiet_threshold, offer_duration
+    FROM merchants
+    """)
+    merchants = cursor.fetchall()
+    if not merchants:
+        return {"candidates": [], "count": 0}
+
+    with_distance = []
+    for row in merchants:
+        merchant_id, name, lat, lon, max_discount, quiet_threshold, offer_duration = row
+        distance = math.sqrt((lat - ctx.lat)**2 + (lon - ctx.lon)**2) * 111000
+        with_distance.append((distance, merchant_id, name, lat, lon, max_discount, quiet_threshold, offer_duration))
+
+    with_distance.sort(key=lambda r: r[0])
+    top = with_distance[:min(ctx.count, 10)]
+
+    base_ctx = ContextPayload(
+        user_id=ctx.user_id, lat=ctx.lat, lon=ctx.lon,
+        weather=ctx.weather, temperature=ctx.temperature,
+    )
+
+    candidates = []
+    for rank, (distance_m, merchant_id, name, lat, lon, max_discount, quiet_threshold, offer_duration) in enumerate(top):
+        context = _offer_context(base_ctx, quiet_threshold)
+        matched_payload = _matched_offer_payload(base_ctx, merchant_id, offer_duration, context)
+
+        if matched_payload:
+            discount = str(matched_payload["discount"])
+            discount_percent = int(matched_payload.get("discount_percent", max_discount))
+            emoji = str(matched_payload["emoji"])
+            headline = str(matched_payload["headline"])
+            reason = str(matched_payload["reason"])
+            valid_minutes = int(matched_payload["valid_minutes"])
+        else:
+            if ctx.temperature < 5:
+                discount_percent = int(max_discount)
+                discount = f"{discount_percent}% off any hot drink"
+                emoji = "☕"
+                headline = "Warm up nearby"
+            else:
+                discount_percent = int(max_discount * 0.9)
+                discount = f"{discount_percent}% off pastry + drink"
+                emoji = "🥐"
+                headline = "Treat yourself"
+            reason = f"Quiet right now - offer valid for {offer_duration} minutes"
+            valid_minutes = offer_duration
+
+        offer_id = f"offer_{uuid.uuid4().hex[:12]}"
+        created_at = datetime.now().isoformat()
+
+        cursor.execute("""
+        INSERT INTO offers (offer_id, merchant_id, discount, emoji, distance_m, headline, created_at, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (offer_id, merchant_id, discount, emoji, int(distance_m), headline, created_at, "generated"))
+
+        cursor.execute("""
+        UPDATE merchant_stats SET offers_sent = offers_sent + 1 WHERE merchant_id = ?
+        """, (merchant_id,))
+
+        maps_url, maps_image_url = build_maps_assets(merchant_id, lat, lon)
+
+        candidates.append({
+            "offer_id": offer_id,
+            "merchant_id": merchant_id,
+            "merchant": name,
+            "merchant_lat": lat,
+            "merchant_lon": lon,
+            "discount": discount,
+            "discount_percent": discount_percent,
+            "emoji": emoji,
+            "distance_m": int(distance_m),
+            "headline": headline,
+            "reason": reason,
+            "valid_minutes": valid_minutes,
+            "created_at": created_at,
+            "status": "generated",
+            "expires_in_seconds": valid_minutes * 60,
+            "message": f"Offer valid for {valid_minutes} minutes",
+            "maps_url": maps_url,
+            "maps_image_url": maps_image_url,
+            "rank": rank,
+        })
+
+    conn.commit()
+    return {"candidates": candidates, "count": len(candidates), "source": "rule_ranked"}
+
 
 def _claim_offer(offer_id: str, user_id: str):
     cursor.execute("""
@@ -1259,57 +1356,41 @@ def get_auto_rule_types():
     return {"rule_types": types_data}
 
 
+def _nearby_merchants_from_db(lat: float, lon: float, radius_km: float, limit: int = 50) -> list[dict]:
+    cursor.execute("SELECT merchant_id, name, lat, lon, place_id, address FROM merchants")
+    rows = cursor.fetchall()
+    results = []
+    for merchant_id, name, m_lat, m_lon, place_id, address in rows:
+        distance_km = math.sqrt((m_lat - lat) ** 2 + (m_lon - lon) ** 2) * 111.0
+        if distance_km <= radius_km:
+            results.append({
+                "place_id": place_id or merchant_id,
+                "merchant_id": merchant_id,
+                "name": name,
+                "lat": m_lat,
+                "lon": m_lon,
+                "address": address or "",
+                "distance_km": round(distance_km, 2),
+                "rating": None,
+                "types": [],
+                "primary_type": None,
+            })
+    results.sort(key=lambda m: m["distance_km"])
+    return results[:limit]
+
+
 @app.get("/api/merchants/nearby")
 def get_nearby_merchants(lat: float, lon: float, radius_km: float = 1.0):
-    try:
-        google_db.init_db()
-        df = google_db.filter_merchants_by_distance(lat, lon, radius_km)
-        df = df.sort("distance_km")
-        merchants = []
-        for row in df.to_dicts():
-            merchants.append({
-                "place_id": row.get("place_id"),
-                "name": row.get("name"),
-                "lat": row.get("lat"),
-                "lon": row.get("lon"),
-                "address": row.get("address"),
-                "distance_km": round(row.get("distance_km", 0), 2),
-                "rating": row.get("rating"),
-                "types": row.get("types", []),
-                "primary_type": row.get("primary_type"),
-            })
-        return {"count": len(merchants), "merchants": merchants}
-    except Exception as e:
-        return {"count": 0, "merchants": [], "error": str(e)}
+    merchants = _nearby_merchants_from_db(lat, lon, radius_km)
+    return {"count": len(merchants), "merchants": merchants}
 
 
 @app.post("/api/recommendations/nearby")
 def recommend_nearby_merchants(body: RecommendationPayload):
-    try:
-        google_db.init_db()
-        df = google_db.filter_merchants_by_distance(body.lat, body.lon, body.radius_km)
-        df = df.sort("distance_km")
-        merchants = []
-        for row in df.to_dicts():
-            merchants.append({
-                "id": row.get("place_id") or row.get("name"),
-                "name": row.get("name"),
-                "lat": row.get("lat"),
-                "lon": row.get("lon"),
-                "address": row.get("address"),
-                "distance_km": round(row.get("distance_km", 0), 2),
-                "rating": row.get("rating"),
-                "types": row.get("types", []),
-                "primary_type": row.get("primary_type"),
-            })
-        count = max(1, min(body.count, 10))
-        return {
-            "count": min(len(merchants), count),
-            "recommendations": merchants[:count],
-            "source": "distance_ranking",
-        }
-    except Exception as e:
-        return {"count": 0, "recommendations": [], "error": str(e)}
+    merchants = _nearby_merchants_from_db(body.lat, body.lon, body.radius_km)
+    count = max(1, min(body.count, 10))
+    recs = [{"id": m["place_id"], **m} for m in merchants[:count]]
+    return {"count": len(recs), "recommendations": recs, "source": "distance_ranking"}
 
 
 @app.post("/api/merchants/search")
