@@ -22,16 +22,8 @@ AI-powered, location-aware offer recommendation system for a digital city wallet
 │   └── lib/                # Shared UI utilities
 │
 ├── backend/                # FastAPI server
-│   ├── api.py              # REST endpoints + APScheduler lifecycle
-│   ├── app.py              # App entry point / factory
+│   ├── api.py              # REST endpoints, SQLite DB, OSM/Overpass search
 │   └── rules.py            # Merchant auto-rule and special offer models
-│
-├── recommendation_engine/  # Data pipeline (OSM / Overpass)
-│   └── src/
-│       ├── api.py          # Overpass API client for POI fetching
-│       ├── db.py           # SQLite schema and queries
-│       ├── gather_data.py  # Orchestrates POI data collection
-│       └── store_data.py   # In-memory Polars DataFrame cache
 │
 ├── data/                   # Static / seed data files
 ├── docs/                   # Extended architecture documentation
